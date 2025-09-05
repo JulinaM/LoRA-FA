@@ -1,0 +1,9 @@
+./__pycache__/*
+./data_cache/*
+./logs/*
+./multirun/*
+./results/*
+./wandb/*
+./*.log
+./*.ipynb
+./*.slurm
