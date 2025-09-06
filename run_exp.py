@@ -168,22 +168,25 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
         else:
             grad_name = ".".join(name.split(".")[2:]) + ".weight"
         grads = named_grad[grad_name]
-        if init_config.direction == "LoRA-One":
-            U, S, V = torch.svd_lowrank(-grads.cuda().float(), q=512, niter=16)
+        if init_config.direction == "LoRA-One" or init_config.direction == "LoRA-FA":
+            U, S, V = torch.svd_lowrank(-grads.cuda().float(), q=512, niter=16) #(d_out × k), (k,), (d_in × k)
         else:
             U, S, V = torch.svd_lowrank(grads.cuda().float(), q=512, niter=16)
         V = V.T
         if init_config.direction == "LoRA-FA":
-            inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device)
-            inv_sqrt_sigma_X = kwargs["inv_sqrt_sigma_X"][grad_name].to(V.device)
-            B = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_sigma_X
-            A = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r]))
+            inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
+            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
+            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X
+            B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r]))
         elif init_config.direction == "LoRA-One":
             B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) / torch.sqrt(S[0])
             A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
         elif init_config.direction == "LoRA-GA":
             B = U[:, lora_r : 2 * lora_r]
             A = V[:lora_r, :]
+        print(init_config.direction)
+        print(B.shape)
+        print(A.shape)
         scaling_factor = module.scaling["default"]
         if init_config.scale == "gd":
             A = A / scaling_factor
@@ -534,6 +537,152 @@ def compute_outer_products_and_roots(
         torch.cuda.empty_cache()
     return sqrt_C, inv_sqrt_C, sqrt_sigma_X, inv_sqrt_sigma_X
 
+def estimate_dataset_whitened_H_and_inv_roots(
+    model: torch.nn.Module,
+    dataset: torch.utils.data.Dataset,
+    lora_target_modules: List[str],
+    batch_size: int = 4,
+    epsilon: float = 1e-8,
+    use_cholesky: bool = False,
+) -> Dict[str, Dict[str, torch.Tensor]]:
+    """
+    Dataset-level statistically-correct estimator.
+    For each target Linear module (identified by substrings in `lora_target_modules`) this function returns:
+        - tilde_H:  C^{1/2} @ ( avg_over_samples[J X^T] ) @ Sigma_X^{1/2}
+        - inv_sqrt_C: (C)^{-1/2}  (dataset-level)
+        - inv_sqrt_Sigma_X: (Sigma_X)^{-1/2}  (dataset-level)
+    Implementation details:
+        - For each batch, we flatten samples across batch and sequence dims to form:
+            J_flat: (num_samples, hidden_dim)
+            X_flat: (num_samples, input_dim)
+        - We accumulate C_full = sum(J_flat^T @ J_flat), Sigma_X_full = sum(X_flat^T @ X_flat),
+          cross_full = sum(J_flat^T @ X_flat), and total_samples.
+        - At the end we form averages (divide by total_samples), compute matrix roots/inverse roots once,
+          build tilde_H, and return (tilde_H, inv_sqrt_C, inv_sqrt_Sigma_X).
+    Note: The function keeps all computations on `device` when possible.
+    """
+    model.eval()
+    device = model.device
+    C_full: Dict[str, torch.Tensor] = {}
+    Sigma_X_full: Dict[str, torch.Tensor] = {}
+    cross_full: Dict[str, torch.Tensor] = {}
+    total_samples: Dict[str, int] = {}
+    hooks = []
+
+    def compute_matrix_roots(mat: torch.Tensor, use_cholesky: bool = False, eps: float = epsilon):
+        # assume mat on correct device
+        if use_cholesky:
+            mat = mat + eps * torch.eye(mat.shape[0], device=mat.device, dtype=mat.dtype)
+            # cholesky will raise if not PD, but eps should help
+            L = torch.linalg.cholesky(mat)
+            sqrt_mat = L
+            inv_L = torch.linalg.inv(L)
+            inv_sqrt_mat = inv_L.T @ inv_L
+        else:
+            eigvals, eigvecs = torch.linalg.eigh(mat)
+            eigvals = torch.clamp(eigvals, min=eps)
+            sqrt_mat = eigvecs @ torch.diag(torch.sqrt(eigvals)) @ eigvecs.T
+            inv_sqrt_mat = eigvecs @ torch.diag(1.0 / torch.sqrt(eigvals)) @ eigvecs.T
+        return sqrt_mat, inv_sqrt_mat
+
+    # Attach forward/backward hooks
+    for name, module in tqdm(model.named_modules(), desc=f"Attaching hooks to {lora_target_modules} layers"):
+        if isinstance(module, torch.nn.Linear) and any(t in name for t in lora_target_modules):
+            # forward: cache input tensor (on-device)
+            def forward_hook(mod, inputs, output, lname=name):
+                # inputs[0] is the layer input; keep reference on device
+                mod._saved_input_for_lora = inputs[0]
+
+            # backward: compute flattened matrices and accumulate outer products
+            def backward_hook(mod, grad_input, grad_output, lname=name):
+                # grad_output[0] is dL/dZ with shape [batch, seq_len, hidden_dim] or [batch, hidden_dim]
+                J = grad_output[0]
+                X = getattr(mod, "_saved_input_for_lora", None)
+
+                # move both to same device (they should already be on device)
+                J = J.detach()
+                X = X.detach()
+
+                # TODO confirm flatten vs summing
+                # flatten sample axis (merge batch and seq dims if present)
+                # sample_dim x feat_dim
+                X_flat = X.reshape(-1, X.shape[-1])
+                J_flat = J.reshape(-1, J.shape[-1]) 
+
+                ns = J_flat.shape[0]
+
+                # Ensure float precision is reasonable (cast to float32 for stability)
+                Xf = X_flat.to(dtype=torch.float32, device=device)
+                Jf = J_flat.to(dtype=torch.float32, device=device)
+
+                # batch-level outer products (unnormalized sums)
+                C_batch = Jf.T @ Jf                 # (hidden_dim x hidden_dim)
+                Sigma_X_batch = Xf.T @ Xf           # (input_dim x input_dim)
+                cross_batch = Jf.T @ Xf             # (hidden_dim x input_dim) #TODO multiply by eta
+
+                # initialize accumulators if first time
+                if lname not in total_samples:
+                    C_full[lname] = C_batch.clone()
+                    Sigma_X_full[lname] = Sigma_X_batch.clone()
+                    cross_full[lname] = cross_batch.clone()
+                    total_samples[lname] = ns
+                else:
+                    C_full[lname] += C_batch
+                    Sigma_X_full[lname] += Sigma_X_batch
+                    cross_full[lname] += cross_batch
+                    total_samples[lname] += ns
+                try:
+                    delattr(mod, "_saved_input_for_lora")
+                except Exception:
+                    pass
+            hooks.append(module.register_forward_hook(forward_hook))
+            hooks.append(module.register_full_backward_hook(backward_hook))
+
+    if not hooks:
+        print("Warning: no target modules found for lora targets:", lora_target_modules)
+        return {}
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+    for batch in tqdm(dataloader, desc="Accumulating dataset-level outer products"):
+        model.zero_grad(set_to_none=True)
+        try:
+            batch = {k: v.to(model.device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
+            outputs = model(**batch)
+            outputs.loss.backward()
+        except Exception as e:
+            print(f"Skipping batch due to error: {e}")
+            continue
+    for h in hooks:
+        h.remove()
+
+    result_tilde_H: Dict[str, torch.Tensor] = {}
+    inv_sqrt_C: Dict[str, torch.Tensor] = {}
+    inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
+    for lname in total_samples.keys():
+        n_samples = total_samples[lname]
+        C_avg = C_full[lname] / float(n_samples)           # (hidden_dim x hidden_dim)
+        Sigma_X_avg = Sigma_X_full[lname] / float(n_samples)  # (input_dim x input_dim)
+        cross_avg = cross_full[lname] / float(n_samples)   # (hidden_dim x input_dim) approximates J X^T / N
+
+        # compute sqrt and inv sqrt from dataset-level covariances
+        sqrt_C, invC = compute_matrix_roots(C_avg, use_cholesky=use_cholesky, eps=epsilon)
+        sqrt_Sigma, invSigma = compute_matrix_roots(Sigma_X_avg, use_cholesky=use_cholesky, eps=epsilon)
+        # whitened H
+        H = sqrt_C @ cross_avg @ sqrt_Sigma
+        # store results (keep H in same dtype/device)
+        result_tilde_H[lname] = H
+        inv_sqrt_C[lname] = invC
+        inv_sqrt_Sigma_X[lname] = invSigma
+
+    print('total_samples:: ', total_samples)
+    torch.cuda.empty_cache()
+    return {
+        "tilde_H": result_tilde_H,
+        "inv_sqrt_C": inv_sqrt_C,
+        "inv_sqrt_Sigma_X": inv_sqrt_Sigma_X,
+    }
+
+
 @hydra.main(version_base="1.2", config_path="conf", config_name="config")
 def run_exp(cfg: DictConfig):
     log.info(OmegaConf.to_yaml(cfg))
@@ -596,7 +745,6 @@ def run_exp(cfg: DictConfig):
         lora_target_modules = find_all_linear_modules(model)
     else:
         lora_target_modules = list(lora_target_modules) if lora_target_modules else []
-        
     if use_peft and cfg.init.mode == "gradient":
         if isinstance(train_set, list):
             temp_set = train_set[: cfg.init.bsz * cfg.init.iters]
@@ -609,23 +757,15 @@ def run_exp(cfg: DictConfig):
             tokenizer=tokenizer,
             max_length=cfg.init.max_length,
         )
-        sample_key = 'model.layers.0.self_attn.q_proj' #only for debugging
+        sample_key = 'model.layers.0.self_attn.q_proj' #TODO only for debugging ***
         if cfg.init.direction == 'LoRA-FA':
-            # nabla_W = estimate_gradient(model, temp_set, cfg.init.bsz)
-            J, X = estimate_Jacobian_Gradient(model, temp_set, lora_target_modules, cfg.init.bsz)
-            print('J::', J[sample_key].shape, 'X:: ', X[sample_key].shape) 
-            sqrt_C, inv_sqrt_C, sqrt_sigma_X, inv_sqrt_sigma_X = compute_outer_products_and_roots(J, X) #TODO Use Cholesky-based method??
-            print('sqrt_C::', sqrt_C[sample_key].shape, 'inv_sqrt_C:: ', inv_sqrt_C[sample_key].shape)
-            print('sqrt_sigma_X::', sqrt_sigma_X[sample_key].shape, 'inv_sqrt_sigma_X:: ', inv_sqrt_sigma_X[sample_key].shape)
-            named_grads = {}
-            for n, params in J.items():
-                nabla_W_approx = torch.matmul(J[n].T, X[n]) #multiply with eta 
-                # assert torch.allclose(nabla_W[n], nabla_W_approx, atol=1e-6)    # TODO compare with lora_ONE
-                if n == sample_key: print('Nabla_W_aprox : ', nabla_W_approx.shape)
-                named_grads[n] = sqrt_C[n] @ nabla_W_approx.float() @ sqrt_sigma_X[n]
-            additional_kwargs["named_grads"] = named_grads
-            additional_kwargs["inv_sqrt_C"] = inv_sqrt_C
-            additional_kwargs["inv_sqrt_sigma_X"]  = inv_sqrt_sigma_X
+            estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
+            print('inv_sqrt_C::', estimates['inv_sqrt_C'][sample_key].shape)
+            print('inv_sqrt_Sigma_X:: ', estimates['inv_sqrt_Sigma_X'][sample_key].shape)
+            print('Tilde H ::', estimates['tilde_H'][sample_key].shape)
+            additional_kwargs["named_grads"] = estimates['tilde_H']
+            additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
+            additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
         else:
             named_grads = estimate_gradient(model, temp_set, cfg.init.bsz)
             additional_kwargs["named_grads"] = named_grads #append grads
