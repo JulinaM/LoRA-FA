@@ -176,17 +176,14 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
         if init_config.direction == "LoRA-FA":
             inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
             inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
-            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X
-            B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r]))
+            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X #A=Sr​(8×8)@VrT​(8×4096)@inv_sqrt_Sigma_X(4096×4096)
+            B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) # B=inv_sqrt_C(4096×4096)@Ur​(4096×8)@Sr​(8×8)
         elif init_config.direction == "LoRA-One":
             B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) / torch.sqrt(S[0])
             A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
         elif init_config.direction == "LoRA-GA":
             B = U[:, lora_r : 2 * lora_r]
             A = V[:lora_r, :]
-        print(init_config.direction)
-        print(B.shape)
-        print(A.shape)
         scaling_factor = module.scaling["default"]
         if init_config.scale == "gd":
             A = A / scaling_factor
@@ -224,7 +221,7 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
         module.lora_A.default.weight = torch.nn.Parameter(A.contiguous().cuda())
         if peft_conf.get("dora", False):
            module.lora_magnitude_vector.default.weight = torch.nn.Parameter(mag_vec.contiguous().cuda())
-
+        print(f"[{name}] Expected A={module.lora_A.default.weight.shape}, "f"B={module.lora_B.default.weight.shape}, "f"Got A={A.shape}, B={B.shape}")
     with torch.no_grad():
         if peft_conf.get("dora", False): #DoRA uses fp16
                 module.lora_A.default.weight.data = module.lora_A.default.weight.data.to(
@@ -404,138 +401,6 @@ def estimate_gradient(
     torch.cuda.empty_cache()
     return named_grads
 
-def estimate_Jacobian_Gradient(
-    model: torch.nn.Module,
-    dataset: torch.utils.data.Dataset,
-    lora_target_modules: List[str],
-    batch_size: int = 4,
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    """
-    Approximates the AVERAGE Jacobian of the loss w.r.t. the pre-activation matrix Z (J = dL/dZ)
-    and collects the corresponding AVERAGE input matrices X for specified target modules.
-    This version dynamically pads tensors to handle variable sequence lengths between batches.
-    Returns:
-        Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]: A tuple of two dictionaries:
-            1. final_J: Keys are module names, values are AVG Jacobian tensors (max_seq_len, hidden_dim).
-            2. final_X: Keys are module names, values are AVG input tensors (max_seq_len, input_dim).
-    """
-    print("--> ", lora_target_modules)
-    J_cache: Dict[str, torch.Tensor] = {}
-    X_cache: Dict[str, torch.Tensor] = {}
-    hooks = []
-
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear) and any(lora_target in name for lora_target in lora_target_modules):
-            J_cache[name], X_cache[name] = None, None
-            print(f"Attaching hooks to: {name}")
-
-            def forward_hook(module, args, output, lname=name):
-                x_sum_batch = torch.sum(args[0].clone().cpu(), dim=0)
-                if X_cache[lname] is None:
-                    X_cache[lname] = x_sum_batch
-                else: #TODO Confirm on the sequence_size of each batch 
-                    max_len = max(X_cache[lname].shape[0], x_sum_batch.shape[0])
-                    if X_cache[lname].shape[0] < max_len:
-                        padding_size = max_len - X_cache[lname].shape[0]
-                        X_cache[lname] = F.pad(X_cache[lname], (0, 0, 0, padding_size), "constant", 0)
-                    if x_sum_batch.shape[0] < max_len:
-                        padding_size = max_len - x_sum_batch.shape[0]
-                        x_sum_batch = F.pad(x_sum_batch, (0, 0, 0, padding_size), "constant", 0)
-                    X_cache[lname] += x_sum_batch
-                Z = output if module.bias is None else output - module.bias
-                Z.retain_grad()
-
-            def backward_hook(module, grad_input, grad_output, lname=name):
-                J_sum_batch = torch.sum(grad_output[0].clone().cpu(), dim=0)
-                if J_cache[lname] is None:
-                    J_cache[lname] = J_sum_batch
-                else:
-                    max_len = max(J_cache[lname].shape[0], J_sum_batch.shape[0])
-                    if J_cache[lname].shape[0] < max_len:
-                        padding_size = max_len - J_cache[lname].shape[0]
-                        J_cache[lname] = F.pad(J_cache[lname], (0, 0, 0, padding_size), "constant", 0)
-                    if J_sum_batch.shape[0] < max_len:
-                        padding_size = max_len - J_sum_batch.shape[0]
-                        J_sum_batch = F.pad(J_sum_batch, (0, 0, 0, padding_size), "constant", 0)
-                    J_cache[lname] += J_sum_batch
-            hooks.append(module.register_forward_hook(forward_hook))
-            hooks.append(module.register_full_backward_hook(backward_hook))
-
-    if not hooks:
-        print("Warning: No target modules found or hooks attached. Please check `lora_target_modules`.")
-        return {}, {}
-
-    model.eval()
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
-    num_batches = len(dataloader)
-    print(f"Processing {len(dataset)} examples in {num_batches} batches...")
-    for batch in tqdm(dataloader, desc="Approximating Jacobian"):
-        model.zero_grad(set_to_none=True)
-        try:
-            batch = {k: v.to(model.device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
-            outputs = model(**batch)
-            outputs.loss.backward()
-        except Exception as e:
-            print(f"Skipping a batch due to an error: {e}")
-            continue
-    for k in J_cache.keys():
-        J_cache[k] /= num_batches
-        X_cache[k] /= num_batches
-    for hook in hooks:
-        hook.remove()
-    return J_cache, X_cache
-
-def compute_outer_products_and_roots(
-    avg_J_dict: Dict[str, torch.Tensor],
-    avg_X_dict: Dict[str, torch.Tensor],
-    use_cpu: bool = True,  # optional flag to force CPU for large matrices
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    """
-    Memory-efficient computation of outer products and their matrix square roots / inverse square roots.
-    """
-    def compute_matrix_roots(matrix: torch.Tensor, epsilon: float = 1e-8) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Move to CPU if memory intensive
-        device = matrix.device
-        if use_cpu:
-            matrix = matrix.cpu()
-        try:
-            # Symmetric eigen-decomposition
-            eigenvalues, eigenvectors = torch.linalg.eigh(matrix.float())
-        except torch.linalg.LinAlgError as e:
-            print(f"Eigendecomposition failed: {e}. Returning identity matrices.")
-            I = torch.eye(matrix.shape[0], device=matrix.device, dtype=matrix.dtype)
-            return I, I
-        eigenvalues = torch.clamp(eigenvalues, min=epsilon)
-        sqrt_eigenvalues = torch.sqrt(eigenvalues)
-        inv_sqrt_eigenvalues = 1.0 / sqrt_eigenvalues
-        sqrt_matrix = eigenvectors @ torch.diag(sqrt_eigenvalues) @ eigenvectors.T
-        inv_sqrt_matrix = eigenvectors @ torch.diag(inv_sqrt_eigenvalues) @ eigenvectors.T
-        if use_cpu:
-            sqrt_matrix = sqrt_matrix.to(device)
-            inv_sqrt_matrix = inv_sqrt_matrix.to(device)
-        return sqrt_matrix, inv_sqrt_matrix
-
-    sqrt_C, inv_sqrt_C = {}, {}
-    sqrt_sigma_X, inv_sqrt_sigma_X = {}, {}
-    # for name, avg_J in avg_J_dict.items():
-    for name, avg_J in tqdm(avg_J_dict.items(), desc="Estimating Symmetric Matrices: C and Sigma_X "):
-        if name not in avg_X_dict:
-            print(f"Warning: No matching input tensor X found for module {name}. Skipping.")
-            continue
-        avg_X = avg_X_dict[name]
-
-        # Move to CPU if memory-intensive
-        device = avg_J.device if not use_cpu else torch.device("cpu")
-        avg_J = avg_J.to(device)
-        avg_X = avg_X.to(device)
-
-        C_mat = avg_J.T @ avg_J
-        Sigma_X_mat = avg_X.T @ avg_X
-        sqrt_C[name], inv_sqrt_C[name] = compute_matrix_roots(C_mat)
-        sqrt_sigma_X[name], inv_sqrt_sigma_X[name] = compute_matrix_roots(Sigma_X_mat)
-        del C_mat, Sigma_X_mat
-        torch.cuda.empty_cache()
-    return sqrt_C, inv_sqrt_C, sqrt_sigma_X, inv_sqrt_sigma_X
 
 def estimate_dataset_whitened_H_and_inv_roots(
     model: torch.nn.Module,
@@ -733,6 +598,10 @@ def run_exp(cfg: DictConfig):
         config=config,
     )
     train_set, val_set, _ = dataset_func()
+    if 'test' in name: 
+        train_set = train_set.select(range(100))
+        val_set = val_set.select(range(10))
+        print( "############################# running for TEST")
     model, tokenizer = initialize_text_to_text_model(
         model_name, model_type, cfg.model.bf16, cfg.peft.use_peft, flash_attention=True
     ) #From here, the pretrained model is initialized
@@ -757,9 +626,9 @@ def run_exp(cfg: DictConfig):
             tokenizer=tokenizer,
             max_length=cfg.init.max_length,
         )
-        sample_key = 'model.layers.0.self_attn.q_proj' #TODO only for debugging ***
         if cfg.init.direction == 'LoRA-FA':
             estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
+            sample_key = next(iter(estimates['inv_sqrt_C'])) #TODO remove the debugs
             print('inv_sqrt_C::', estimates['inv_sqrt_C'][sample_key].shape)
             print('inv_sqrt_Sigma_X:: ', estimates['inv_sqrt_Sigma_X'][sample_key].shape)
             print('Tilde H ::', estimates['tilde_H'][sample_key].shape)
