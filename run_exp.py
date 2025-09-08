@@ -533,7 +533,7 @@ def estimate_dataset_whitened_H_and_inv_roots(
         sqrt_C, invC = compute_matrix_roots(C_avg, use_cholesky=use_cholesky, eps=epsilon)
         sqrt_Sigma, invSigma = compute_matrix_roots(Sigma_X_avg, use_cholesky=use_cholesky, eps=epsilon)
         # whitened H
-        H = sqrt_C @ cross_avg @ sqrt_Sigma
+        H = sqrt_C @ cross_avg @ sqrt_Sigma # TODO H0 = cross_avg
         # store results (keep H in same dtype/device)
         result_tilde_H[lname] = H
         inv_sqrt_C[lname] = invC
