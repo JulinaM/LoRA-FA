@@ -3,7 +3,11 @@
 ./logs/*
 ./multirun/*
 ./results/*
+./safe_results/*
 ./wandb/*
 ./*.log
 ./*.ipynb
 ./*.slurm
+./notebooks/*
+./wandb/*
+./*.out
