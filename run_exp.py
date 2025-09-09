@@ -623,9 +623,12 @@ def run_exp(cfg: DictConfig):
     additional_kwargs = {} #generate empty args
 
     if lora_target_modules == "all":
-        lora_target_modules = find_all_linear_modules(model)
+        lora_target_modules = find_all_linear_modules(model) 
+    elif lora_target_modules == "last":
+        lora_target_modules = get_llama_last_layers(model) 
     else:
         lora_target_modules = list(lora_target_modules) if lora_target_modules else []
+    print(lora_target_modules)
     if use_peft and cfg.init.mode == "gradient":
         if isinstance(train_set, list):
             temp_set = train_set[: cfg.init.bsz * cfg.init.iters]
