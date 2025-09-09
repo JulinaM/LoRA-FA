@@ -174,10 +174,12 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
             U, S, V = torch.svd_lowrank(grads.cuda().float(), q=512, niter=16)
         V = V.T
         if init_config.direction == "LoRA-FA":
-            inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
-            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
-            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X #A=Sr​(8×8)@VrT​(8×4096)@inv_sqrt_Sigma_X(4096×4096)
-            B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) # B=inv_sqrt_C(4096×4096)@Ur​(4096×8)@Sr​(8×8)
+            # inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
+            # inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
+            # A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X #A=Sr​(8×8)@VrT​(8×4096)@inv_sqrt_Sigma_X(4096×4096)
+            # B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) # B=inv_sqrt_C(4096×4096)@Ur​(4096×8)@Sr​(8×8)
+            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] 
+            B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) 
         elif init_config.direction == "LoRA-One":
             B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) / torch.sqrt(S[0])
             A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
@@ -428,8 +430,8 @@ def estimate_dataset_whitened_H_and_inv_roots(
     """
     model.eval()
     device = model.device
-    C_full: Dict[str, torch.Tensor] = {}
-    Sigma_X_full: Dict[str, torch.Tensor] = {}
+    # C_full: Dict[str, torch.Tensor] = {}
+    # Sigma_X_full: Dict[str, torch.Tensor] = {}
     cross_full: Dict[str, torch.Tensor] = {}
     total_samples: Dict[str, int] = {}
     hooks = []
@@ -481,19 +483,19 @@ def estimate_dataset_whitened_H_and_inv_roots(
                 Jf = J_flat.to(dtype=torch.float32, device=device)
 
                 # batch-level outer products (unnormalized sums)
-                C_batch = Jf.T @ Jf                 # (hidden_dim x hidden_dim)
-                Sigma_X_batch = Xf.T @ Xf           # (input_dim x input_dim)
+                # C_batch = Jf.T @ Jf                 # (hidden_dim x hidden_dim)
+                # Sigma_X_batch = Xf.T @ Xf           # (input_dim x input_dim)
                 cross_batch = Jf.T @ Xf             # (hidden_dim x input_dim) #TODO multiply by eta
 
                 # initialize accumulators if first time
                 if lname not in total_samples:
-                    C_full[lname] = C_batch.clone()
-                    Sigma_X_full[lname] = Sigma_X_batch.clone()
+                    # C_full[lname] = C_batch.clone()
+                    # Sigma_X_full[lname] = Sigma_X_batch.clone()
                     cross_full[lname] = cross_batch.clone()
                     total_samples[lname] = ns
                 else:
-                    C_full[lname] += C_batch
-                    Sigma_X_full[lname] += Sigma_X_batch
+                    # C_full[lname] += C_batch
+                    # Sigma_X_full[lname] += Sigma_X_batch
                     cross_full[lname] += cross_batch
                     total_samples[lname] += ns
                 try:
@@ -521,30 +523,30 @@ def estimate_dataset_whitened_H_and_inv_roots(
         h.remove()
 
     result_tilde_H: Dict[str, torch.Tensor] = {}
-    inv_sqrt_C: Dict[str, torch.Tensor] = {}
-    inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
+    # inv_sqrt_C: Dict[str, torch.Tensor] = {}
+    # inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
     for lname in total_samples.keys():
         n_samples = total_samples[lname]
-        C_avg = C_full[lname] / float(n_samples)           # (hidden_dim x hidden_dim)
-        Sigma_X_avg = Sigma_X_full[lname] / float(n_samples)  # (input_dim x input_dim)
+        # C_avg = C_full[lname] / float(n_samples)           # (hidden_dim x hidden_dim)
+        # Sigma_X_avg = Sigma_X_full[lname] / float(n_samples)  # (input_dim x input_dim)
         cross_avg = cross_full[lname] / float(n_samples)   # (hidden_dim x input_dim) approximates J X^T / N
 
         # compute sqrt and inv sqrt from dataset-level covariances
-        sqrt_C, invC = compute_matrix_roots(C_avg, use_cholesky=use_cholesky, eps=epsilon)
-        sqrt_Sigma, invSigma = compute_matrix_roots(Sigma_X_avg, use_cholesky=use_cholesky, eps=epsilon)
+        # sqrt_C, invC = compute_matrix_roots(C_avg, use_cholesky=use_cholesky, eps=epsilon)
+        # sqrt_Sigma, invSigma = compute_matrix_roots(Sigma_X_avg, use_cholesky=use_cholesky, eps=epsilon)
         # whitened H
-        H = sqrt_C @ cross_avg @ sqrt_Sigma # TODO H0 = cross_avg
+        H = cross_avg #sqrt_C @ cross_avg @ sqrt_Sigma # TODO H0 = cross_avg
         # store results (keep H in same dtype/device)
         result_tilde_H[lname] = H
-        inv_sqrt_C[lname] = invC
-        inv_sqrt_Sigma_X[lname] = invSigma
+        # inv_sqrt_C[lname] = invC
+        # inv_sqrt_Sigma_X[lname] = invSigma
 
     print('total_samples:: ', total_samples)
     torch.cuda.empty_cache()
     return {
         "tilde_H": result_tilde_H,
-        "inv_sqrt_C": inv_sqrt_C,
-        "inv_sqrt_Sigma_X": inv_sqrt_Sigma_X,
+        # "inv_sqrt_C": inv_sqrt_C,
+        # "inv_sqrt_Sigma_X": inv_sqrt_Sigma_X,
     }
 
 
@@ -628,13 +630,13 @@ def run_exp(cfg: DictConfig):
         )
         if cfg.init.direction == 'LoRA-FA':
             estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
-            sample_key = next(iter(estimates['inv_sqrt_C'])) #TODO remove the debugs
-            print('inv_sqrt_C::', estimates['inv_sqrt_C'][sample_key].shape)
-            print('inv_sqrt_Sigma_X:: ', estimates['inv_sqrt_Sigma_X'][sample_key].shape)
+            sample_key = next(iter(estimates['tilde_H'])) #TODO remove the debugs
+            # print('inv_sqrt_C::', estimates['inv_sqrt_C'][sample_key].shape)
+            # print('inv_sqrt_Sigma_X:: ', estimates['inv_sqrt_Sigma_X'][sample_key].shape)
             print('Tilde H ::', estimates['tilde_H'][sample_key].shape)
             additional_kwargs["named_grads"] = estimates['tilde_H']
-            additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
-            additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
+            # additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
+            # additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
         else:
             named_grads = estimate_gradient(model, temp_set, cfg.init.bsz)
             additional_kwargs["named_grads"] = named_grads #append grads
