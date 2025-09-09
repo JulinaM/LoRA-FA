@@ -58,6 +58,19 @@ def find_all_linear_modules(model) -> List[str]:
             module_names.add(name.split(".")[-1])
     return list(module_names)
 
+def get_llama_last_layers(model):
+    """
+    Returns:
+        last_block_linear: list of nn.Linear names in last transformer block
+    """
+    last_block = model.model.layers[-1]
+    last_block_linear = []
+    for name, module in last_block.named_modules():
+        if isinstance(module, torch.nn.Linear):
+            full_name = f"model.layers.{len(model.model.layers)-1}.{name}"
+            last_block_linear.append(full_name)
+    return last_block_linear
+
 
 def find_hidden_state_size(model):
     for name, module in model.named_modules():
@@ -614,6 +627,8 @@ def run_exp(cfg: DictConfig):
 
     if lora_target_modules == "all":
         lora_target_modules = find_all_linear_modules(model)
+    elif lora_target_modules =="last":
+        lora_target_modules = get_llama_last_layers(model)
     else:
         lora_target_modules = list(lora_target_modules) if lora_target_modules else []
     if use_peft and cfg.init.mode == "gradient":
