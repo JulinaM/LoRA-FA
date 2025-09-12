@@ -71,7 +71,6 @@ def get_llama_last_layers(model):
             last_block_linear.append(full_name)
     return last_block_linear
 
-
 def find_hidden_state_size(model):
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
