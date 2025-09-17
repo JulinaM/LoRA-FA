@@ -17,6 +17,7 @@ import wandb
 from data import *
 from typing import List
 import torch
+import torch.nn as nn
 from copy import deepcopy
 import logging
 from tqdm import tqdm, trange
@@ -70,6 +71,16 @@ def get_llama_last_layers(model):
             full_name = f"model.layers.{len(model.model.layers)-1}.{name}"
             last_block_linear.append(full_name)
     return last_block_linear
+
+
+def remove_dropout(module):
+    print('-> removing droupouts ')
+    for name, child in module.named_children():
+        if isinstance(child, nn.Dropout) or isinstance(child, nn.Dropout2d) or isinstance(child, nn.Dropout3d):
+            setattr(module, name, nn.Identity())
+        else:
+            remove_dropout(child)
+
 
 def find_hidden_state_size(model):
     for name, module in model.named_modules():
@@ -434,9 +445,8 @@ def estimate_dataset_whitened_H_and_inv_roots(
         - For each batch, we flatten samples across batch and sequence dims to form:
             J_flat: (num_samples, hidden_dim)
             X_flat: (num_samples, input_dim)
-        - We accumulate C_full = sum(J_flat^T @ J_flat), Sigma_X_full = sum(X_flat^T @ X_flat),
-          cross_full = sum(J_flat^T @ X_flat), and total_samples.
-        - At the end we form averages (divide by total_samples), compute matrix roots/inverse roots once,
+        - We accumulate C_full = sum(J_flat^T @ J_flat), Sigma_X_full = sum(X_flat^T @ X_flat), cross_full = sum(J_flat^T @ X_flat).
+        - At the end we form averages (divide by num_of_batch), compute matrix roots/inverse roots once,
           build tilde_H, and return (tilde_H, inv_sqrt_C, inv_sqrt_Sigma_X).
     Note: The function keeps all computations on `device` when possible.
     """
@@ -445,7 +455,6 @@ def estimate_dataset_whitened_H_and_inv_roots(
     # C_full: Dict[str, torch.Tensor] = {}
     # Sigma_X_full: Dict[str, torch.Tensor] = {}
     cross_full: Dict[str, torch.Tensor] = {}
-    total_samples: Dict[str, int] = {}
     hooks = []
 
     def compute_matrix_roots(mat: torch.Tensor, use_cholesky: bool = False, eps: float = epsilon):
@@ -480,17 +489,14 @@ def estimate_dataset_whitened_H_and_inv_roots(
                 # C_batch = Jf.T @ Jf                 # (hidden_dim x hidden_dim)
                 # Sigma_X_batch = Xf.T @ Xf           # (input_dim x input_dim)
                 cross_batch = Jf.T @ Xf             # (hidden_dim x input_dim) #TODO multiply by eta
-
                 if lname not in cross_full:
                     # C_full[lname] = C_batch.clone()
                     # Sigma_X_full[lname] = Sigma_X_batch.clone()
                     cross_full[lname] = cross_batch.clone()
-                    total_samples[lname] = ns
                 else:
                     # C_full[lname] += C_batch
                     # Sigma_X_full[lname] += Sigma_X_batch
                     cross_full[lname] += cross_batch
-                    total_samples[lname] += ns
                 try:
                     delattr(mod, "_saved_input_for_lora")
                 except Exception:
@@ -625,6 +631,7 @@ def run_exp(cfg: DictConfig):
             max_length=cfg.init.max_length,
         )
         if cfg.init.direction == 'LoRA-FA':
+            remove_dropout(model) #TODO
             estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
             sample_key = next(iter(estimates['tilde_H'])) #TODO remove the debugs
             # print('inv_sqrt_C::', estimates['inv_sqrt_C'][sample_key].shape)
@@ -634,6 +641,7 @@ def run_exp(cfg: DictConfig):
             # additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
             # additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
         else:
+            remove_dropout(model) #TODO
             named_grads = estimate_gradient(model, temp_set, cfg.init.bsz)
             additional_kwargs["named_grads"] = named_grads #append grads
             #From here, we got full-batch GD gradients
