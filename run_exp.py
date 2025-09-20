@@ -197,7 +197,7 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
         V = V.T
         if init_config.direction == "LoRA-FA":
             inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
-            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
+            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(U.device)  # d_in X d_in
             A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X #A=Sr​(8×8)@VrT​(8×4096)@inv_sqrt_Sigma_X(4096×4096)
             B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) # B=inv_sqrt_C(4096×4096)@Ur​(4096×8)@Sr​(8×8)
             # A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
@@ -549,32 +549,6 @@ def estimate_dataset_whitened_H_and_inv_roots(
         inv_sqrt_C[lname] = invC
         inv_sqrt_Sigma_X[lname] = invSigma
 
-        #TODO DEBUG
-        if 'layers.31' in lname:
-            print("lname:: ", lname)
-            print('inv_sqrt_C::', invC.shape)
-            print('inv_sqrt_Sigma_X::', invSigma.shape)
-            print('Tilde H ::', result_tilde_H[lname].shape)
-
-            def matrix_norms(mat: torch.Tensor):
-                frob = torch.norm(mat, p='fro').item()
-                l2 = torch.linalg.norm(mat, ord=2).item() 
-                return frob, l2
-            
-            fro_C, l2_C = matrix_norms(C_avg)
-            fro_X, l2_X = matrix_norms(Sigma_X_avg)
-            fro_cross, l2_cross = matrix_norms(cross_avg)
-            fro_all_3, l2_all_3 = matrix_norms(sqrt_C @ cross_avg @ sqrt_Sigma)
-            fro_sq_C, l2_sq_C = matrix_norms(sqrt_C)
-            fro_sg_Sigma, l2_sq_Sigma = matrix_norms(sqrt_Sigma)
-
-            print(f"  ||C||_F = {fro_C:.4e}, ||C||_2 = {l2_C:.4e}")
-            print(f"  ||Σ_X||_F = {fro_X:.4e}, ||Σ_X||_2 = {l2_X:.4e}")
-            print(f"  ||Cross||_F = {fro_cross:.4e}, ||Cross||_2 = {l2_cross:.4e}")
-            print(f"  ||all_3||_F = {fro_all_3:.4e}, ||all_3||_2 = {l2_all_3:.4e}")
-            print(f"  ||sq_C||_F = {fro_sq_C:.4e}, ||sq_C||_2 = {l2_sq_C:.4e}")
-            print(f"  ||sg_Sigma||_F = {fro_sg_Sigma:.4e}, ||sq_Sigma||_2 = {l2_sq_Sigma:.4e}")
-
     torch.cuda.empty_cache()
     return {
         "tilde_H": result_tilde_H,
@@ -665,13 +639,13 @@ def run_exp(cfg: DictConfig):
             max_length=cfg.init.max_length,
         )
         if cfg.init.direction == 'LoRA-FA':
-            remove_dropout(model) #TODO
+            # remove_dropout(model) #TODO
             estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
             additional_kwargs["named_grads"] = estimates['tilde_H']
             additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
             additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
         else:
-            remove_dropout(model) #TODO
+            # remove_dropout(model) #TODO
             named_grads = estimate_gradient(model, temp_set, cfg.init.bsz)
             additional_kwargs["named_grads"] = named_grads #append grads
             #From here, we got full-batch GD gradients
