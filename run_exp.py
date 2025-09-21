@@ -196,12 +196,17 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
             U, S, V = torch.svd_lowrank(grads.cuda().float(), q=512, niter=16)
         V = V.T
         if init_config.direction == "LoRA-FA":
-            inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(U.device) # d_out X d_out
-            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(U.device)  # d_in X d_in
-            A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] @ inv_sqrt_Sigma_X #A=Sr​(8×8)@VrT​(8×4096)@inv_sqrt_Sigma_X(4096×4096)
-            B = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) # B=inv_sqrt_C(4096×4096)@Ur​(4096×8)@Sr​(8×8)
-            # A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
-            # B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) / torch.sqrt(S[0])
+            inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(V.device) # d_out X d_out
+            inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
+            BA = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(S[:lora_r]) @ V[:lora_r, :] @ inv_sqrt_Sigma_X 
+            print(BA.shape)
+            U1, S1, V1 = torch.svd_lowrank(BA.cuda().float(), q=512, niter=16)
+            print("U1: ", U1.shape)
+            print("S1:", S1.shape)
+            print("V1:", V1.shape)
+            V1 =V1.T
+            B = U1[:, :lora_r] @ torch.diag(torch.sqrt(S1[:lora_r])) / torch.sqrt(S1[0])
+            A = torch.diag(torch.sqrt(S1[:lora_r])) @ V1[:lora_r, :] / torch.sqrt(S1[0])
         elif init_config.direction == "LoRA-One":
             B = U[:, :lora_r] @ torch.diag(torch.sqrt(S[:lora_r])) / torch.sqrt(S[0])
             A = torch.diag(torch.sqrt(S[:lora_r])) @ V[:lora_r, :] / torch.sqrt(S[0])
