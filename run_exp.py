@@ -550,31 +550,31 @@ def estimate_dataset_whitened_H_and_inv_roots(
         inv_sqrt_C[lname] = invC
         inv_sqrt_Sigma_X[lname] = invSigma
 
-        #TODO DEBUG
-        if 'layers.31' in lname:
-            print("lname:: ", lname)
-            print('inv_sqrt_C::', invC.shape)
-            print('inv_sqrt_Sigma_X::', invSigma.shape)
-            print('Tilde H ::', result_tilde_H[lname].shape)
+        # #TODO DEBUG
+        # if 'layers.31' in lname:
+        #     print("lname:: ", lname)
+        #     print('inv_sqrt_C::', invC.shape)
+        #     print('inv_sqrt_Sigma_X::', invSigma.shape)
+        #     print('Tilde H ::', result_tilde_H[lname].shape)
 
-            def matrix_norms(mat: torch.Tensor):
-                frob = torch.norm(mat, p='fro').item()
-                l2 = torch.linalg.norm(mat, ord=2).item() 
-                return frob, l2
+        #     def matrix_norms(mat: torch.Tensor):
+        #         frob = torch.norm(mat, p='fro').item()
+        #         l2 = torch.linalg.norm(mat, ord=2).item() 
+        #         return frob, l2
             
-            fro_C, l2_C = matrix_norms(C_avg)
-            fro_X, l2_X = matrix_norms(Sigma_X_avg)
-            fro_cross, l2_cross = matrix_norms(cross_avg)
-            fro_all_3, l2_all_3 = matrix_norms(sqrt_C @ cross_avg @ sqrt_Sigma)
-            fro_sq_C, l2_sq_C = matrix_norms(sqrt_C)
-            fro_sg_Sigma, l2_sq_Sigma = matrix_norms(sqrt_Sigma)
+        #     fro_C, l2_C = matrix_norms(C_avg)
+        #     fro_X, l2_X = matrix_norms(Sigma_X_avg)
+        #     fro_cross, l2_cross = matrix_norms(cross_avg)
+        #     fro_all_3, l2_all_3 = matrix_norms(sqrt_C @ cross_avg @ sqrt_Sigma)
+        #     fro_sq_C, l2_sq_C = matrix_norms(sqrt_C)
+        #     fro_sg_Sigma, l2_sq_Sigma = matrix_norms(sqrt_Sigma)
 
-            print(f"  ||C||_F = {fro_C:.4e}, ||C||_2 = {l2_C:.4e}")
-            print(f"  ||Σ_X||_F = {fro_X:.4e}, ||Σ_X||_2 = {l2_X:.4e}")
-            print(f"  ||Cross||_F = {fro_cross:.4e}, ||Cross||_2 = {l2_cross:.4e}")
-            print(f"  ||all_3||_F = {fro_all_3:.4e}, ||all_3||_2 = {l2_all_3:.4e}")
-            print(f"  ||sq_C||_F = {fro_sq_C:.4e}, ||sq_C||_2 = {l2_sq_C:.4e}")
-            print(f"  ||sg_Sigma||_F = {fro_sg_Sigma:.4e}, ||sq_Sigma||_2 = {l2_sq_Sigma:.4e}")
+        #     print(f"  ||C||_F = {fro_C:.4e}, ||C||_2 = {l2_C:.4e}")
+        #     print(f"  ||Σ_X||_F = {fro_X:.4e}, ||Σ_X||_2 = {l2_X:.4e}")
+        #     print(f"  ||Cross||_F = {fro_cross:.4e}, ||Cross||_2 = {l2_cross:.4e}")
+        #     print(f"  ||all_3||_F = {fro_all_3:.4e}, ||all_3||_2 = {l2_all_3:.4e}")
+        #     print(f"  ||sq_C||_F = {fro_sq_C:.4e}, ||sq_C||_2 = {l2_sq_C:.4e}")
+        #     print(f"  ||sg_Sigma||_F = {fro_sg_Sigma:.4e}, ||sq_Sigma||_2 = {l2_sq_Sigma:.4e}")
 
     torch.cuda.empty_cache()
     return {
@@ -666,13 +666,13 @@ def run_exp(cfg: DictConfig):
             max_length=cfg.init.max_length,
         )
         if cfg.init.direction == 'LoRA-FA':
-            remove_dropout(model) #TODO
+            # remove_dropout(model) #TODO
             estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
             additional_kwargs["named_grads"] = estimates['tilde_H']
             additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
             additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']
         else:
-            remove_dropout(model) #TODO
+            # remove_dropout(model) #TODO
             named_grads = estimate_gradient(model, temp_set, cfg.init.bsz)
             additional_kwargs["named_grads"] = named_grads #append grads
             #From here, we got full-batch GD gradients
