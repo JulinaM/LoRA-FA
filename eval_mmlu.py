@@ -8,7 +8,7 @@ from fire import Fire
 from tqdm import tqdm
 import torch
 
-from utils import initialize_text_to_text_model
+from utils import initialize_text_to_text_model, load_peft_model
 from data import template_wo_input
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -171,8 +171,12 @@ def evaluate(ntrain, subject, model, tokenizer, dev_df, test_df):
     return cors, acc, all_probs
 
 
-def main(model_path, ntrain: int = 5, data_dir = 'data'):
-    model, tokenizer = initialize_text_to_text_model(model_path, "CausalLM", True, flash_attention=True)
+def main(wandb_name, ntrain: int = 5, data_dir = 'data'):
+    # model, tokenizer = initialize_text_to_text_model(model_path, "CausalLM", True, flash_attention=True)
+    model, tokenizer = initialize_text_to_text_model("meta-llama/Llama-2-7b-hf", "CausalLM", True, flash_attention=True)
+    model = load_peft_model(model, f'./results/lorafa_alpaca/{wandb_name}/9')
+    model = model.to('cuda')
+
     model.generation_config.do_sample=False
     model.eval()
     subjects = sorted(
@@ -223,7 +227,7 @@ def main(model_path, ntrain: int = 5, data_dir = 'data'):
     weighted_acc = np.mean(np.concatenate(all_cors))
     print("Average accuracy: {:.3f}".format(weighted_acc))
     import json
-    with open(f"{model_path.replace('/', '_')}_results.json", "w") as f:
+    with open(f"{wandb_name.replace('/', '_')}_results.json", "w") as f:
         json.dump(
             {
                 "sub_cat_result": sub_cat_result,

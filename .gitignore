@@ -11,3 +11,9 @@
 ./notebooks/*
 ./wandb/*
 ./*.out
+./data/*
+./humaneval_samples/*
+./human-eval/
+./evaluation_results/*
+./commonsense_data/*
+./*.json

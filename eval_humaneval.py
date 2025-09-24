@@ -1,7 +1,7 @@
 from human_eval.data import write_jsonl, read_problems
 from fire import Fire
 from tqdm import trange, tqdm
-from utils import initialize_text_to_text_model, model_inference
+from utils import initialize_text_to_text_model, model_inference, load_peft_model
 import re
 import os
 
@@ -40,7 +40,7 @@ def post_process(text):
         def_line_space = spaces_for_each_line[def_line]
     except:
         print("No def line found")
-        print(text)
+        # print(text)
         def_line_space = 0
     rank_unique_spaces = sorted(list(set(spaces_for_each_line)))
     indentation_level = {}
@@ -63,13 +63,18 @@ def generate_one_completion(model, tokenizer, model_type, prompt, template=True)
     post_pred = post_process(pred_text)
     return post_pred
 
-def main(model_name, num_sample=1):
+def main(wandb_name, num_sample=1):
+    print("wandb_name  -->", wandb_name)
     best_temperature = {1: 0.1, 10: 0.6, 100: 0.8}
     problems = read_problems()
+    if "test" in wandb_name:
+        problems = dict(list(problems.items())[:5])
     model_type = "CausalLM"
-    model, tokenizer = initialize_text_to_text_model(
-        model_name, model_type, True, tokenizer="meta-llama/Llama-2-7b-hf",flash_attention=True
-    )
+    
+    model, tokenizer = initialize_text_to_text_model("meta-llama/Llama-2-7b-hf", model_type, True, flash_attention=True)
+    model = load_peft_model(model, f'./results/lorafa_codefeedback/{wandb_name}/9/')
+    model = model.to('cuda')
+
     #model.generation_config.temperature = best_temperature[num_sample]
     #model.generation_config.top_p = 0.95
     model.generation_config.temperature = None
@@ -80,7 +85,7 @@ def main(model_name, num_sample=1):
         for task_id in tqdm(problems, desc="Tasks")
         for _ in range(num_sample)
     ]
-    target_name = os.path.join("humaneval_samples", f"{model_name.replace('/', '_')}_nsamples{num_sample}_humaneval_samples.jsonl")
+    target_name = os.path.join("humaneval_samples", f"{wandb_name}.jsonl")
     write_jsonl(target_name, samples)
 
 if __name__ == "__main__":

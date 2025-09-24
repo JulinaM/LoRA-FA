@@ -1,5 +1,5 @@
 from data import load_gsm8k
-from utils import model_inference, initialize_text_to_text_model
+from utils import model_inference, initialize_text_to_text_model, load_peft_model
 from fire import Fire
 import re
 import os
@@ -24,16 +24,25 @@ def extract_num(text):
 
 def main(model_name, wandb_name, temperature=None, top_p=None):
     wandb.init(
-        entity="xxx",
         project="llama_eval_gsm8k",
         name=wandb_name
     )
     _, _, test_set = load_gsm8k()
+    if 'test' in wandb_name:
+        test_set = test_set.select(range(1000))
+        flash_attention = False
+    else:
+        flash_attention = True
+
+    print("model_name -->", model_name)
     model_type = "CausalLM"
-    model, tokenizer = initialize_text_to_text_model(
-        model_name, model_type, True, tokenizer="meta-llama/Llama-2-7b-hf",flash_attention=True
-    )
+    # model, tokenizer = initialize_text_to_text_model(
+    #     model_name, model_type, True, tokenizer="meta-llama/Llama-2-7b-hf",flash_attention=True
+    # )
+    model, tokenizer = initialize_text_to_text_model("meta-llama/Llama-2-7b-hf", model_type, True, flash_attention=True)
+    model = load_peft_model(model, f'./results/lorafa_meta_math/{wandb_name}/9/')
     model = model.to('cuda')
+
     model.generation_config.temperature = temperature
     model.generation_config.top_p = top_p
 
