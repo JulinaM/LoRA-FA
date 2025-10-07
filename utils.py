@@ -280,8 +280,8 @@ def train_text_to_text_model(
         bf16=kwargs.get("bf16", False),
         gradient_checkpointing=kwargs.get("gradient_checkpointing", False),
         optim=kwargs.get("optim", "adamw_torch"),
-        # evaluation_strategy="steps",
-        eval_strategy="steps",
+        evaluation_strategy="steps",
+        # eval_strategy="steps",
         eval_steps=eval_steps,
         #save_steps=eval_steps,
         #save_strategy="steps",
@@ -300,9 +300,9 @@ def train_text_to_text_model(
         ],  # Peft are not compatible with HF's default label names yet
         # Ref: https://discuss.huggingface.co/t/eval-with-trainer-not-running-with-peft-lora-model/53286
         weight_decay = kwargs.get("weight_decay", 0), # No weight decay
-        #warmup_ratio = 0.03,
-        warmup_steps = 100,
-        lr_scheduler_type = "linear", # cosine
+        warmup_ratio = kwargs.get("warmup_ratio", 0),
+        warmup_steps = kwargs.get("warmup_steps", 0),
+        lr_scheduler_type = kwargs.get("lr_scheduler_type", "linear"),
         seed = kwargs.get("seed", 42),
         # Multi-GPU setting
         #dataloader_num_workers=4,
@@ -311,12 +311,13 @@ def train_text_to_text_model(
         **additional_kwargs,
     )
 
+    print("run_nam", run_name)
     trainer = TrainerClass(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=valid_dataset,
-        compute_metrics=compute_metrics if "llama" not in run_name else None,
+        compute_metrics=compute_metrics if "t5base" in run_name else None,
         #callbacks=[
         #    EarlyStoppingCallback(
         #        early_stopping_patience=kwargs.get("early_stopping_patience", 10)
