@@ -172,7 +172,7 @@ def initialize_text_to_text_model(
     return model, tokenizer
 
 
-def compute_metrics(p: PredictionOutput):
+def compute_metrics_soft(p: PredictionOutput):
     predictions = p.predictions
     label_ids = p.label_ids # shape (batch_size, seq_len)
     if False:
@@ -197,14 +197,14 @@ def compute_metrics(p: PredictionOutput):
 
     return {"accuracy": accuracy}
 
-'''def compute_metrics(p: PredictionOutput):
+def compute_metrics(p: PredictionOutput):
     predictions = p.predictions
     label_ids = p.label_ids # shape (batch_size, seq_len)
     pred = np.argmax(predictions[0], axis=-1)
     num_correct = sum([np.array_equal(pred[i], label_ids[i]) for i in range(len(pred))])
     accuracy = num_correct / len(pred)
 
-    return {"accuracy": accuracy}'''
+    return {"accuracy": accuracy}
 
 
 def transform_dataset(model_type, tokenizer, dataset, max_length):
@@ -310,6 +310,13 @@ def train_text_to_text_model(
         #ddp_find_unused_parameters=False,  # Critical for LoRA on multi-GPU, ref: https://discuss.huggingface.co/t/training-llama-with-lora-on-multiple-gpus-may-exist-bug/47005
         **additional_kwargs,
     )
+    def_compute = None
+    if "t5base" in run_name:
+        if "cola" in run_name or "mrpc" in run_name:
+            def_compute = compute_metrics_soft
+        else:
+            def_compute = compute_metrics
+
 
     print("run_nam", run_name)
     trainer = TrainerClass(
@@ -317,7 +324,7 @@ def train_text_to_text_model(
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=valid_dataset,
-        compute_metrics=compute_metrics if "t5base" in run_name else None,
+        compute_metrics=def_compute
         #callbacks=[
         #    EarlyStoppingCallback(
         #        early_stopping_patience=kwargs.get("early_stopping_patience", 10)

@@ -531,7 +531,7 @@ def estimate_dataset_whitened_H_and_inv_roots(
     inv_sqrt_C: Dict[str, torch.Tensor] = {}
     inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
     for lname in cross_full.keys():
-        print(f'total_samples in {lname}::', total_samples[lname])
+        # print(f'total_samples in {lname}::', total_samples[lname])
 
         alpha = 1e-6
         print('alpha --> ', alpha)
