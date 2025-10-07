@@ -201,9 +201,9 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
             BA = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(S[:lora_r]) @ V[:lora_r, :] @ inv_sqrt_Sigma_X 
             print(BA.shape)
             U1, S1, V1 = torch.svd_lowrank(BA.cuda().float(), q=512, niter=16)
-            print("U1: ", U1.shape)
-            print("S1:", S1.shape)
-            print("V1:", V1.shape)
+            # print("U1: ", U1.shape)
+            # print("S1:", S1.shape)
+            # print("V1:", V1.shape)
             V1 =V1.T
             B = U1[:, :lora_r] @ torch.diag(torch.sqrt(S1[:lora_r])) / torch.sqrt(S1[0])
             A = torch.diag(torch.sqrt(S1[:lora_r])) @ V1[:lora_r, :] / torch.sqrt(S1[0])
@@ -250,7 +250,7 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
         module.lora_A.default.weight = torch.nn.Parameter(A.contiguous().cuda())
         if peft_conf.get("dora", False):
            module.lora_magnitude_vector.default.weight = torch.nn.Parameter(mag_vec.contiguous().cuda())
-        print(f"[{name}] Expected A={module.lora_A.default.weight.shape}, "f"B={module.lora_B.default.weight.shape}, "f"Got A={A.shape}, B={B.shape}") #TODO
+        # print(f"[{name}] Expected A={module.lora_A.default.weight.shape}, "f"B={module.lora_B.default.weight.shape}, "f"Got A={A.shape}, B={B.shape}") #TODO
     with torch.no_grad():
         if peft_conf.get("dora", False): #DoRA uses fp16
                 module.lora_A.default.weight.data = module.lora_A.default.weight.data.to(
@@ -425,16 +425,6 @@ def estimate_gradient(
                 p.grad = None
     for n, g in named_grads.items():
         named_grads[n] /= num
-        if 'layers.31' in n and any(t in n for t in ['k_proj']):
-            print("lname: ", n)
-            def matrix_norms(mat: torch.Tensor):
-                mat = mat.to(dtype=torch.float32, device=model.device)
-                frob = torch.norm(mat, p='fro').item()
-                l2 = torch.linalg.norm(mat, ord=2).item()  # largest singular value
-                return frob, l2
-             
-            frob, l2 = matrix_norms(named_grads[n])
-            print(f"  ||grad||_F = {frob:.4e}, ||grad||_2 = {l2:.4e}")
     for hook in hooks:
         hook.remove()
     torch.cuda.empty_cache()
@@ -542,8 +532,19 @@ def estimate_dataset_whitened_H_and_inv_roots(
     inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
     for lname in cross_full.keys():
         print(f'total_samples in {lname}::', total_samples[lname])
-        C_avg = C_full[lname] / float(total_samples[lname])           # (hidden_dim x hidden_dim)
-        Sigma_X_avg = Sigma_X_full[lname] / float(total_samples[lname])  # (input_dim x input_dim)
+
+        alpha = 1e-6
+        print('alpha --> ', alpha)
+        hidden_dim = C_full[lname].shape[0]
+        input_dim = Sigma_X_full[lname].shape[0]
+        C_avg = C_full[lname] / float(total_samples[lname]) + alpha * torch.eye(hidden_dim, device=device)
+        Sigma_X_avg = Sigma_X_full[lname] / float(total_samples[lname]) + alpha * torch.eye(input_dim, device=device)
+
+        # C_avg = ((1 - cons1) * C_full[lname] / float(total_samples[lname])+ cons1 * torch.eye(hidden_dim, device=device)) 
+        # Sigma_X_avg = ((1 - cons2) * Sigma_X_full[lname] / float(total_samples[lname]) + cons2 * torch.eye(input_dim, device=device)) 
+
+        # C_avg = C_full[lname] / float(total_samples[lname])           # (hidden_dim x hidden_dim)
+        # Sigma_X_avg = Sigma_X_full[lname] / float(total_samples[lname])  # (input_dim x input_dim)
         cross_avg = cross_full[lname] / float(total_samples[lname])   # (hidden_dim x input_dim) approximates J X^T / N
 
         # compute sqrt and inv sqrt from dataset-level covariances
@@ -569,7 +570,10 @@ def run_exp(cfg: DictConfig):
     model_name = cfg.model.name
     model_type = cfg.model.type
     dataset_name = cfg.dataset_name
-    dataset_func = DATASET_MAP[dataset_name]
+    if dataset_name in ['lamp_news_headlines', 'lamp_scholarly_titles', 'longlamp_abstract_generation', 'longlamp_product_review', 'longlamp_topic_writing']:
+        dataset_func = DATASET_MAP['persona']
+    else:
+        dataset_func = DATASET_MAP[dataset_name]
     use_peft = cfg.peft.use_peft
     if_use_rslora = cfg.peft.use_rslora
     lora_r = cfg.peft.lora_r
@@ -611,8 +615,12 @@ def run_exp(cfg: DictConfig):
         name=name,
         config=config,
     )
-    train_set, val_set, _ = dataset_func()
+    if dataset_name in ['lamp_news_headlines', 'lamp_scholarly_titles', 'longlamp_abstract_generation', 'longlamp_product_review', 'longlamp_topic_writing']:
+        train_set, val_set, _ = dataset_func(dataset_name)
+    else:
+        train_set, val_set, _ = dataset_func()
     if 'test' in name: 
+        print("Actual size of train_set: ", len(train_set))
         train_set = train_set.select(range(100))
         val_set = val_set.select(range(10))
         print( "############################# running for TEST")
@@ -780,6 +788,9 @@ def run_exp(cfg: DictConfig):
         loraplus_lr_ratio=cfg.peft.loraplus_lr_ratio,
         learning_rate=cfg.model.learning_rate,
         weight_decay=cfg.model.weight_decay,
+        lr_scheduler_type = cfg.model.lr_scheduler_type,
+        warmup_ratio=cfg.model.warmup_ratio,
+        warmup_steps=cfg.model.warmup_steps,
         num_process=accelerator.num_processes,
         gradient_checkpointing=cfg.get("gradient_checkpointing", False),
         seed=cfg.seed,

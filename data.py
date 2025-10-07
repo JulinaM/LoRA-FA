@@ -1,7 +1,7 @@
 from datasets import load_dataset, Dataset
 import typing as tp
 import functools
-import os
+import os, glob
 import pickle
 import logging
 
@@ -222,22 +222,47 @@ def load_alpaca():
     validation_set = dataset["train"].train_test_split(test_size=0.1)['test']
     return train_set, validation_set, validation_set
 
+# @cache_to_disk("data_cache")
+# def load_commonsense_reasoning_old():
+#     # dataset = load_dataset("json", data_files="/home/y/yuanhezhang/HPC-LoRA/reproduce/commonsense_170k.json")
+#     dataset = load_dataset("zwhe99/commonsense_170k")
+#     def csrs_preprocess(instruction, input, output):
+#         if input == "":
+#             x = template_wo_input.format(instruction=instruction)
+#         else:
+#             x = template_with_input.format(instruction=instruction, input=input)
+#         return {"x": x, "y": output}
+#     dataset = dataset.map(
+#         lambda e: csrs_preprocess(e["instruction"], e["input"], e["output"])
+#     )
+#     # we sample 10% of the training set as validation set
+#     train_set = dataset["train"].train_test_split(test_size=120, shuffle=True, seed=42)['train']
+#     validation_set = dataset["train"].train_test_split(test_size=120, shuffle=True, seed=42)['test']
+#     return train_set, validation_set, validation_set
+
 @cache_to_disk("data_cache")
 def load_commonsense_reasoning():
-    # dataset = load_dataset("json", data_files="/home/y/yuanhezhang/HPC-LoRA/reproduce/commonsense_170k.json")
-    dataset = load_dataset("zwhe99/commonsense_170k")
-    def csrs_preprocess(instruction, input, output):
-        if input == "":
-            x = template_wo_input.format(instruction=instruction)
+    data = load_dataset("json", data_files="/users/PGS0218/julina/projects/GOAT-PEFT/dataset/commonsense_170k.json") 
+    dataset = data["train"].train_test_split(test_size=120, shuffle=True, seed=42)
+    def preprocess(data):
+        if data["input"]:
+            return {"x": f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
+                        ### Instruction:
+                        {data["instruction"]}
+                        ### Input:
+                        {data["input"]}
+                        ### Response:""",
+                    "y": data["output"]
+                    }
         else:
-            x = template_with_input.format(instruction=instruction, input=input)
-        return {"x": x, "y": output}
-    dataset = dataset.map(
-        lambda e: csrs_preprocess(e["instruction"], e["input"], e["output"])
-    )
-    # we sample 10% of the training set as validation set
-    train_set = dataset["train"].train_test_split(test_size=120, shuffle=True, seed=42)['train']
-    validation_set = dataset["train"].train_test_split(test_size=120, shuffle=True, seed=42)['test']
+            return {"x": f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
+                    ### Instruction:
+                    {data["instruction"]}
+                    ### Response:""",
+                    "y": data["output"]}
+    dataset = dataset.map(preprocess)
+    train_set = dataset["train"]
+    validation_set = dataset["test"]
     return train_set, validation_set, validation_set
 
 @cache_to_disk("data_cache")
@@ -574,35 +599,73 @@ def load_wic():
     validation_set = dataset["validation"]
     return train_set, validation_set, validation_set
 
+@cache_to_disk("data_cache")
+def load_longlamp_abstract_generation():
+    data_path = "/users/PGS0218/julina/projects/abstract_generation/personalization_data/longlamp_abstract_generation/train_k1_subset_200_users.jsonl"
+    ds_all = load_dataset("json", data_files={'train': data_path})
+    ds = ds_all['train']
+    def persona_preprocess(instruction, input, output):
+        if input == "" or input is None:
+            x = template_wo_input.format(instruction=instruction)
+        else:
+            x = template_with_input.format(instruction=instruction, input=input)
+        return {"x": x, "y": output}
+    ds = ds.map(lambda e: persona_preprocess(e["instruction"], e["input"], e["output"]))
+    dataset_split = ds.train_test_split(test_size=0.1, seed=42)
+    train_set = dataset_split['train']
+    validation_set = dataset_split['test']
+    return train_set, validation_set, validation_set
+
+def load_persona(data_path):
+    data_path = f"/users/PGS0218/julina/projects/personalization_data/{data_path}/train_k1*.jsonl"
+    print(f"LOADING data from {data_path}")
+    ds_all = load_dataset("json", data_files={'train': data_path})
+    ds = ds_all['train']
+    def persona_preprocess(instruction, input, output):
+        if input == "" or input is None:
+            x = template_wo_input.format(instruction=instruction)
+        else:
+            x = template_with_input.format(instruction=instruction, input=input)
+        return {"x": x, "y": output}
+    ds = ds.map(lambda e: persona_preprocess(e["instruction"], e["input"], e["output"]))
+    dataset_split = ds.train_test_split(test_size=0.1, seed=42)
+    train_set = dataset_split['train']
+    validation_set = dataset_split['test']
+    print("[load_persona] ", train_set, validation_set)
+    return train_set, validation_set, validation_set
+
 DATASET_MAP = {
-    "sst2": load_sst2,
-    "cola": load_cola,
-    "qqp": load_qqp,
-    "mrpc": load_mrpc,
-    "mnli": load_mnli,
-    "emo": load_emo,
-    "squad": load_squad,
-    "alpaca": load_alpaca,
-    "commonsense_reasoning": load_commonsense_reasoning,
-    "qnli": load_qnli,
-    "gsm8k": load_gsm8k,
-    "alpaca_gpt4": load_alpaca_gpt4,
-    "flan": load_flan,
-    "flan_v2": load_flan_v2,
+    "persona": load_persona,
+    "longlamp_abstract": load_longlamp_abstract_generation,
+    "sst2": load_sst2, # glue
+    "cola": load_cola, # glue
+    "qqp": load_qqp, # glue
+    "mrpc": load_mrpc,# glue
+    "mnli": load_mnli,# glue
+    "qnli": load_qnli, # glue
+    "rte": load_rte, # glue
     "meta_math": load_meta_math,
     "meta_math_full": load_meta_math_full,
-    "codefeedback": load_codefeedback,
-    "wizard_lm": load_wizardlm,
+    "gsm8k": load_gsm8k,
+    "codefeedback": load_codefeedback, 
+    "alpaca": load_alpaca, #MMLU
+    "alpaca_gpt4": load_alpaca_gpt4,
+    "commonsense_reasoning": load_commonsense_reasoning,
+    "wizard_lm": load_wizardlm, #MT_Bench/dialogue
+
+    "emo": load_emo,
+    "squad": load_squad,
+    "flan": load_flan,
+    "flan_v2": load_flan_v2,
     "boolq": load_boolq,
     "cb": load_cb,
     "copa": load_copa,
-    "rte": load_rte,
     "wic": load_wic,
     "cifar10": load_cifar10,
     "cifar100": load_cifar100,
-    "cars": load_cars,
-    "svhn": load_svhn,
-    "dtd": load_dtd,
+    "cars": load_cars,  #CLIP ViT
+    "svhn": load_svhn, #CLIP ViT
+    "dtd": load_dtd, #CLIP ViT
 }
 
 if __name__ == "__main__":

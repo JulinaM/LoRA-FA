@@ -1,6 +1,7 @@
 ./__pycache__/*
 ./data_cache/*
 ./logs/*
+./logs_persona/*
 ./multirun/*
 ./results/*
 ./safe_results/*
@@ -17,3 +18,6 @@
 ./evaluation_results/*
 ./commonsense_data/*
 ./*.json
+./FastChat_old/*
+./json_results_alpaca/*
+./metrics.txt

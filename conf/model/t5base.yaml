@@ -9,3 +9,7 @@ early_stopping_patience: 5
 max_length: 128
 logging_steps: 1
 learning_rate: 1e-4
+weight_decay: 0.0
+warmup_ratio: 0.03
+warmup_steps: 0
+lr_scheduler_type: cosine
