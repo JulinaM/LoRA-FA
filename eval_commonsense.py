@@ -12,7 +12,7 @@ import re
 import sys
 import argparse
 from utils import (
-    initialize_text_to_text_model,
+    initialize_text_to_text_model, load_peft_model
 )
 import fire
 import torch
@@ -105,10 +105,13 @@ def main():
     batches = create_batch(dataset, args.batch_size)
     
     model_type = "CausalLM"
-    model, tokenizer = initialize_text_to_text_model(
-        args.base_model, model_type, True, tokenizer="meta-llama/Llama-2-7b-hf",flash_attention=False
-    )
+    # model, tokenizer = initialize_text_to_text_model(
+    #     args.base_model, model_type, True, tokenizer="meta-llama/Llama-2-7b-hf",flash_attention=False
+    # )
+    model, tokenizer = initialize_text_to_text_model("meta-llama/Llama-2-7b-hf", model_type, True, flash_attention=True)
+    model = load_peft_model(model, f'./results/lorafa_commonsense_reasoning/{args.wandb_name}/9/')
     model = model.to('cuda')
+    
     #new features
     tokenizer.padding_side = "left"
     tokenizer.pad_token_id = (
@@ -212,9 +215,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', choices=["boolq", "piqa", "social_i_qa", "hellaswag", "winogrande", "ARC-Challenge", "ARC-Easy", "openbookqa"],
                         required=True)
-    parser.add_argument('--base_model', required=True)
-    parser.add_argument('--name', required=True)
-    parser.add_argument('--batch_size', type=int, required=True)
+    parser.add_argument('--wandb_name', required=True)
+    # parser.add_argument('--name', required=True)
+    # parser.add_argument('--batch_size', type=int, required=True)
 
     return parser.parse_args()
 
