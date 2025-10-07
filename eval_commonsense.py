@@ -92,13 +92,12 @@ def main():
         outputs = [o.split("### Response:")[-1].strip() for o in outputs]
         return outputs
 
-    save_file = f'comm_eval/{args.name}.txt'
-    create_dir('comm_eval/')
+    save_file = f'comm_eval/lorafa.txt'
+    os.makedirs('comm_eval', exist_ok=True)
 
     wandb.init(
-        entity="xxx",
         project="comm_eval",
-        name=args.name
+        name=args.wandb_name
     )
 
     dataset = load_data(args)
@@ -168,14 +167,9 @@ def main():
         with open(save_file, "w") as f:
             f.write("Model Acc\n")
     with open(save_file, "a") as f:
-        f.write(f"{args.dataset} {correct / current}\n")
+        f.write(f"{args.wandb_name}: {args.dataset} {correct / current}\n")
     print('\n')
     print('test finished')
-
-def create_dir(dir_path):
-    if not os.path.exists(dir_path):
-        os.mkdir(dir_path)
-    return
 
 template_wo_input = '''Below is an instruction that describes a task. Write a response that appropriately completes the request.
 
