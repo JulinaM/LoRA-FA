@@ -1,4 +1,4 @@
-The Official PyTorch implementation of [**Data-Aware Low-Rank Adaptation (LoRA-FA) **]
+The Official PyTorch implementation of [**Data-Aware Low-Rank Adaptation (LoRA-FA)**]
 
 ### Content Overview
 
@@ -22,6 +22,7 @@ learning and periodic teacher realignment, mirroring human learning dynamics. To
 a theoretical foundation for efficient, data-aware, and aligned low-rank adaptation—offering both conceptual clarity
 and practical design principles for future PEFT research.
 
+---
 ### Algorithmic Overview
 
 
@@ -52,7 +53,6 @@ python run_exp.py -m \
         ++dataset_name=meta_math \
         ++model.epochs=1 \
         ++model.eval_epochs=1 \
-        ++model.saving=false \
         +init=gradient \
         ++init.direction=LoRA-FA \
         ++init.weight="stable" \
@@ -61,15 +61,9 @@ python run_exp.py -m \
         ++peft.lora_r=8 \
         ++peft.use_rslora=True \
         ++peft.lora_alpha=16 \
-        ++seed=9 \
         ++wandb.name=$runname \
         ++wandb.project=lorafa \
-        ++init.iters=$iters \
-        ++model.warmup_steps=0 \
-        ++model.warmup_ratio=0.03 \
-        ++model.weight_decay=0.0 \
-        ++model.lr_scheduler_type=cosine \
-        ++model.learning_rate=2e-4 \
+        ++init.iters=$iters 
 ```
 
 For multi-GPU training, please use the following slurm command (2 GPUs example)
@@ -80,7 +74,6 @@ CUDA_VISIBLE_DEVICES="0,1" accelerate launch \
         ++dataset_name=meta_math \
         ++model.epochs=1 \
         ++model.eval_epochs=1 \
-        ++model.saving=false \
         +init=gradient \
         ++init.direction=LoRA-FA \
         ++init.weight="stable" \
@@ -89,19 +82,13 @@ CUDA_VISIBLE_DEVICES="0,1" accelerate launch \
         ++peft.lora_r=8 \
         ++peft.use_rslora=True \
         ++peft.lora_alpha=16 \
-        ++seed=9 \
         ++wandb.name=$runname \
         ++wandb.project=lorafa \
-        ++init.iters=$iters \
-        ++model.warmup_steps=0 \
-        ++model.warmup_ratio=0.03 \
-        ++model.weight_decay=0.0 \
-        ++model.lr_scheduler_type=cosine \
-        ++model.learning_rate=2e-4 \
+        ++init.iters=$iters 
 ```
 
 ---
 ### Evaluation
 
-#### Math
+#### Math 
 torchrun --nproc_per_node=2 eval_gsm8k.py --wandb_name="$runname"
