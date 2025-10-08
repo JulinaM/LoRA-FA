@@ -1,4 +1,4 @@
-The Official PyTorch implementation of [**Data-Aware Low-Rank Adaptation (LoRA-FA)**]
+The Official PyTorch implementation of [**LoRA-FA: Data-Aware Low-Rank Adaptation (Low-Rank Initialization via Gradient SVD using Functional Approximation)**]
 
 ### Content Overview
 
