@@ -191,7 +191,8 @@ def load_data(args) -> list:
     Returns:
 
     """
-    file_path = f'dataset/{args.dataset}/test.json'
+    # file_path = f'dataset/{args.dataset}/test.json'
+    file_path = f'../GOAT-PEFT/dataset/{args.dataset}/test.json'
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"can not find dataset file : {file_path}")
     json_data = json.load(open(file_path, 'r'))
@@ -211,7 +212,7 @@ def parse_args():
                         required=True)
     parser.add_argument('--wandb_name', required=True)
     # parser.add_argument('--name', required=True)
-    # parser.add_argument('--batch_size', type=int, required=True)
+    parser.add_argument('--batch_size', type=int, default=16)
 
     return parser.parse_args()
 

@@ -199,11 +199,8 @@ def reinit_lora_modules(name, module, init_config, peft_conf, **kwargs):
             inv_sqrt_C = kwargs["inv_sqrt_C"][grad_name].to(V.device) # d_out X d_out
             inv_sqrt_Sigma_X = kwargs["inv_sqrt_Sigma_X"][grad_name].to(V.device)  # d_in X d_in
             BA = inv_sqrt_C @ U[:, :lora_r] @ torch.diag(S[:lora_r]) @ V[:lora_r, :] @ inv_sqrt_Sigma_X 
-            print(BA.shape)
+            # print('[LoRA-FA] ', BA.shape)
             U1, S1, V1 = torch.svd_lowrank(BA.cuda().float(), q=512, niter=16)
-            # print("U1: ", U1.shape)
-            # print("S1:", S1.shape)
-            # print("V1:", V1.shape)
             V1 =V1.T
             B = U1[:, :lora_r] @ torch.diag(torch.sqrt(S1[:lora_r])) / torch.sqrt(S1[0])
             A = torch.diag(torch.sqrt(S1[:lora_r])) @ V1[:lora_r, :] / torch.sqrt(S1[0])
@@ -511,7 +508,7 @@ def estimate_dataset_whitened_H_and_inv_roots(
             hooks.append(module.register_full_backward_hook(backward_hook))
 
     if not hooks:
-        print("Warning: no target modules found for lora targets:", lora_target_modules)
+        print("[LoRA-FA] Warning: no target modules found for lora targets:", lora_target_modules)
         return {}
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
@@ -522,7 +519,7 @@ def estimate_dataset_whitened_H_and_inv_roots(
             outputs = model(**batch)
             outputs.loss.backward()
         except Exception as e:
-            print(f"Skipping batch due to error: {e}")
+            print(f"[LoRA-FA] Skipping batch due to error: {e}")
             continue
     for h in hooks:
         h.remove()
@@ -530,11 +527,10 @@ def estimate_dataset_whitened_H_and_inv_roots(
     result_tilde_H: Dict[str, torch.Tensor] = {}
     inv_sqrt_C: Dict[str, torch.Tensor] = {}
     inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
+    alpha = 1e-6
+    print('[LoRA-FA] Using alpha: ', alpha)
     for lname in cross_full.keys():
-        # print(f'total_samples in {lname}::', total_samples[lname])
-
-        alpha = 1e-6
-        print('alpha --> ', alpha)
+        # print(f'[LoRA-FA] total_samples in {lname}::', total_samples[lname])
         hidden_dim = C_full[lname].shape[0]
         input_dim = Sigma_X_full[lname].shape[0]
         C_avg = C_full[lname] / float(total_samples[lname]) + alpha * torch.eye(hidden_dim, device=device)
@@ -609,7 +605,6 @@ def run_exp(cfg: DictConfig):
     else:
         name = "_".join([f"{k}={v}" for k, v in config.items()])
     cfg.wandb.project += "_" + cfg.dataset_name
-    print (name, cfg.wandb.entity, cfg.wandb.project)
     wandb.init(
         project=cfg.wandb.project,
         name=name,
@@ -620,10 +615,9 @@ def run_exp(cfg: DictConfig):
     else:
         train_set, val_set, _ = dataset_func()
     if 'test' in name: 
-        print("Actual size of train_set: ", len(train_set))
+        print("[TEST] Actual size of train_set: ", len(train_set))
         train_set = train_set.select(range(100))
         val_set = val_set.select(range(10))
-        print( "############################# running for TEST")
     model, tokenizer = initialize_text_to_text_model(
         model_name, model_type, cfg.model.bf16, cfg.peft.use_peft, flash_attention=True
     ) #From here, the pretrained model is initialized
@@ -638,13 +632,13 @@ def run_exp(cfg: DictConfig):
         lora_target_modules = get_llama_last_layers(model) 
     else:
         lora_target_modules = list(lora_target_modules) if lora_target_modules else []
-    print(lora_target_modules)
+    print('LoRA Target Modules ', lora_target_modules)
     if use_peft and cfg.init.mode == "gradient":
         if isinstance(train_set, list):
             temp_set = train_set[: cfg.init.bsz * cfg.init.iters]
         else:
             temp_set = train_set.select(range(cfg.init.bsz * cfg.init.iters))
-            print('--> ', len(temp_set))
+            print('Batch size for gradient calculation', len(temp_set))
         transform_dataset(
             model_type=model_type,
             dataset=temp_set,
