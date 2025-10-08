@@ -171,7 +171,7 @@ def evaluate(ntrain, subject, model, tokenizer, dev_df, test_df):
     return cors, acc, all_probs
 
 
-def main(wandb_name, ntrain: int = 5, data_dir = 'data'):
+def main(wandb_name, ntrain: int = 5, data_dir = '../hf-datasets/mmlu_data/data'):
     # model, tokenizer = initialize_text_to_text_model(model_path, "CausalLM", True, flash_attention=True)
     model, tokenizer = initialize_text_to_text_model("meta-llama/Llama-2-7b-hf", "CausalLM", True, flash_attention=True)
     model = load_peft_model(model, f'./results/lorafa_alpaca/{wandb_name}/9')
@@ -227,7 +227,8 @@ def main(wandb_name, ntrain: int = 5, data_dir = 'data'):
     weighted_acc = np.mean(np.concatenate(all_cors))
     print("Average accuracy: {:.3f}".format(weighted_acc))
     import json
-    with open(f"{wandb_name.replace('/', '_')}_results.json", "w") as f:
+    
+    with open(f"eval_results/alpaca_eval/{wandb_name.replace('/', '_')}_results.json", "w") as f:
         json.dump(
             {
                 "sub_cat_result": sub_cat_result,

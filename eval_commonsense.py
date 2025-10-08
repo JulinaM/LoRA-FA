@@ -92,11 +92,11 @@ def main():
         outputs = [o.split("### Response:")[-1].strip() for o in outputs]
         return outputs
 
-    save_file = f'comm_eval/lorafa.txt'
-    os.makedirs('comm_eval', exist_ok=True)
+    save_file = f'eval_results/commonsense_eval/lorafa.txt'
+    os.makedirs('eval_results/commonsense_eval', exist_ok=True)
 
     wandb.init(
-        project="comm_eval",
+        project="commonsense_eval",
         name=args.wandb_name
     )
 
@@ -192,7 +192,7 @@ def load_data(args) -> list:
 
     """
     # file_path = f'dataset/{args.dataset}/test.json'
-    file_path = f'../GOAT-PEFT/dataset/{args.dataset}/test.json'
+    file_path = f'../hf-datasets/commonsense_eval/{args.dataset}/test.json'
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"can not find dataset file : {file_path}")
     json_data = json.load(open(file_path, 'r'))

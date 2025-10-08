@@ -242,7 +242,7 @@ def load_alpaca():
 
 @cache_to_disk("data_cache")
 def load_commonsense_reasoning():
-    data = load_dataset("json", data_files="/users/PGS0218/julina/projects/GOAT-PEFT/dataset/commonsense_170k.json") 
+    data = load_dataset("json", data_files="../hf-datasets/commonsense_170k.json") 
     dataset = data["train"].train_test_split(test_size=120, shuffle=True, seed=42)
     def preprocess(data):
         if data["input"]:

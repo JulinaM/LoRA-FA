@@ -84,7 +84,7 @@ def main(wandb_name):
         })
 
     # --- Save results ---
-    output_file = f"./dialogue_eval/{model_id}_answers.jsonl"
+    output_file = f"./eval_results/dialogue_eval/{model_id}_answers.jsonl"
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, "w") as f:
         for answer in model_answers:

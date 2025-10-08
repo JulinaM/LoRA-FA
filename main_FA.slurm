@@ -4,7 +4,7 @@
 #SBATCH --gpus=2
 #SBATCH --cpus-per-task=8
 #SBATCH --time=12:00:00
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 
 # USAGE: sbatch main_FA.slurm math 8 <tag> <extra_arg>
 # --- Argument Handling ---
@@ -37,6 +37,7 @@ module purge
 module load cuda/12.4.1
 module load miniconda3/24.1.2-py310
 source activate loraone
+#backup venv in lora
 
 # --- W&B API Key ---
 export WANDB_API_KEY=""
@@ -53,6 +54,9 @@ echo "Date : $(date)"
 echo "Python : $(which python)"
 echo "CUDA_VISIBLE_DEVICES : $CUDA_VISIBLE_DEVICES"
 echo "Git branch : $(git rev-parse --abbrev-ref HEAD)"   # <- Added branch info
+echo "Torch version: $(python -c 'import torch; print(torch.__version__)')"
+echo "CUDA available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+echo "GPUs detected: $(python -c 'import torch; print(torch.cuda.device_count())')"
 
 
 echo "Executing command for job type: $JOB_TYPE"
@@ -60,7 +64,7 @@ case $JOB_TYPE in
   math)
       CUDA_VISIBLE_DEVICES=0 accelerate launch run_exp.py -m \
         ++dataset_name=meta_math \
-        ++model.epochs=3 \
+        ++model.epochs=1 \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -82,20 +86,18 @@ case $JOB_TYPE in
         ++model.learning_rate=2e-4 \
       
       ckpt="./results/lorafa_meta_math/$wandb_name/9/"
-      echo "Checkpoint: $ckpt"
       torchrun --nproc_per_node=2 eval_gsm8k.py --model_name="$ckpt" --wandb_name="$wandb_name"
     ;;
 
   math_eval)
     ckpt="./results/lorafa_meta_math/$wandb_name/9/"
-    echo "Checkpoint: $ckpt"
     srun python eval_gsm8k.py --model_name=$ckpt --wandb_name=$wandb_name
     ;;
 
   code)
     accelerate launch run_exp.py  \
     -m ++dataset_name=codefeedback \
-        ++model.epochs=3 \
+        ++model.epochs=1 \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -117,11 +119,11 @@ case $JOB_TYPE in
         ++model.learning_rate=2e-4 \
 
     torchrun --nproc_per_node=2 eval_humaneval.py  --wandb_name="$wandb_name"
-    python -m human_eval.evaluate_functional_correctness humaneval_samples/$wandb_name.jsonl
+    python -m human_eval.evaluate_functional_correctness eval_results/humaneval_samples/$wandb_name.jsonl
     ;;
   code_eval)
     torchrun --nproc_per_node=2 eval_humaneval.py  --wandb_name="$wandb_name"
-    python -m human_eval.evaluate_functional_correctness humaneval_samples/$wandb_name.jsonl
+    python -m human_eval.evaluate_functional_correctness eval_results/humaneval_samples/$wandb_name.jsonl
     ;;
 
   alpaca)
@@ -218,7 +220,7 @@ nlu)
   CUDA_VISIBLE_DEVICES=0 accelerate launch run_exp.py  \
   -m ++dataset_name=$4 \
       model=t5base \
-      ++model.epochs=3 \
+      ++model.epochs=10 \
       ++model.saving=false \
       +init=gradient \
       ++init.direction=LoRA-FA \

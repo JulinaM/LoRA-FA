@@ -1,5 +1,6 @@
 ./__pycache__/*
 ./commonsense_data/*
+./comm_eval/*
 ./data/*
 ./data_cache/*
 ./diaglogue-eval/*
@@ -22,3 +23,4 @@
 ./*.out
 ./*.json
 ./metrics.txt
+./eval_persona_vll.py

@@ -85,7 +85,7 @@ def main(wandb_name, num_sample=1):
         for task_id in tqdm(problems, desc="Tasks")
         for _ in range(num_sample)
     ]
-    target_name = os.path.join("humaneval_samples", f"{wandb_name}.jsonl")
+    target_name = os.path.join("eval_results/humaneval_samples", f"{wandb_name}.jsonl")
     write_jsonl(target_name, samples)
 
 if __name__ == "__main__":
