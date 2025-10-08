@@ -1,6 +1,7 @@
-The Official PyTorch implementation of [**LoRA-FA: Data-Aware Low-Rank Adaptation (Low-Rank Initialization via Gradient SVD using Functional Approximation)**]
+The Official PyTorch implementation of [**LoRA-FA: Data-Aware Low-Rank Adaptation**]
 
 ### Content Overview
+(Low-Rank Initialization via Gradient SVD using Functional Approximation)
 
 Parameter-efficient fine-tuning (PEFT) methods such as Low-Rank Adaptation (LoRA) have become the de facto
 strategy for adapting large pre-trained models to downstream tasks with minimal trainable parameters. Despite their
