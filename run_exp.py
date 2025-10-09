@@ -433,6 +433,7 @@ def estimate_dataset_whitened_H_and_inv_roots(
     dataset: torch.utils.data.Dataset,
     lora_target_modules: List[str],
     batch_size: int = 4,
+    reg_alpha: float = 1e-6,
     epsilon: float = 1e-8,
     use_cholesky: bool = False,
 ) -> Dict[str, Dict[str, torch.Tensor]]:
@@ -527,14 +528,14 @@ def estimate_dataset_whitened_H_and_inv_roots(
     result_tilde_H: Dict[str, torch.Tensor] = {}
     inv_sqrt_C: Dict[str, torch.Tensor] = {}
     inv_sqrt_Sigma_X: Dict[str, torch.Tensor] = {}
-    alpha = 1e-6
-    print('[LoRA-FA] Using alpha: ', alpha)
+    # reg_alpha = 1e-6
+    print('[LoRA-FA] Using reg_alpha: ', reg_alpha)
     for lname in cross_full.keys():
         # print(f'[LoRA-FA] total_samples in {lname}::', total_samples[lname])
         hidden_dim = C_full[lname].shape[0]
         input_dim = Sigma_X_full[lname].shape[0]
-        C_avg = C_full[lname] / float(total_samples[lname]) + alpha * torch.eye(hidden_dim, device=device)
-        Sigma_X_avg = Sigma_X_full[lname] / float(total_samples[lname]) + alpha * torch.eye(input_dim, device=device)
+        C_avg = C_full[lname] / float(total_samples[lname]) + reg_alpha * torch.eye(hidden_dim, device=device)
+        Sigma_X_avg = Sigma_X_full[lname] / float(total_samples[lname]) + reg_alpha * torch.eye(input_dim, device=device)
 
         # C_avg = ((1 - cons1) * C_full[lname] / float(total_samples[lname])+ cons1 * torch.eye(hidden_dim, device=device)) 
         # Sigma_X_avg = ((1 - cons2) * Sigma_X_full[lname] / float(total_samples[lname]) + cons2 * torch.eye(input_dim, device=device)) 
@@ -647,7 +648,7 @@ def run_exp(cfg: DictConfig):
         )
         if cfg.init.direction == 'LoRA-FA':
             # remove_dropout(model) #TODO
-            estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz)
+            estimates = estimate_dataset_whitened_H_and_inv_roots(model, temp_set, lora_target_modules, cfg.init.bsz, cfg.init.reg_alpha)
             additional_kwargs["named_grads"] = estimates['tilde_H']
             additional_kwargs["inv_sqrt_C"] = estimates['inv_sqrt_C']
             additional_kwargs["inv_sqrt_Sigma_X"]  = estimates['inv_sqrt_Sigma_X']

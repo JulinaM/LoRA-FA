@@ -15,18 +15,18 @@ if [ -z "$1" ]; then
 fi
 JOB_TYPE=$1
 iters=$2 
-run_type=$3  # test or base or default
-extra_arg=$4  # test file for commonsense
-wandb_name=loraone-$iters-$run_type # loraone-32 or loraone-16
+ep=$3  #epoch
+extra_arg=$4  # test file for commonsense or <tag>
+wandb_name=loraone-$iters-ep$ep-$extra_arg  # loraone-32-ep1-test or loraone-16-ep3-V1
 echo "wandb_name: $wandb_name"
 
 # --- Dynamic Logging ---
 LOG_DIR="logs/loraone"
 mkdir -p $LOG_DIR 
 if [ -n "$extra_arg" ]; then
-    LOG_FILE="${LOG_DIR}/${iters}_${run_type}_${JOB_TYPE}_${extra_arg}_${SLURM_JOB_ID}.out"
+    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${run_type}_${JOB_TYPE}_${extra_arg}_${SLURM_JOB_ID}.out"
 else
-    LOG_FILE="${LOG_DIR}/${iters}_${run_type}_${JOB_TYPE}_${SLURM_JOB_ID}.out"
+    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${run_type}_${JOB_TYPE}_${SLURM_JOB_ID}.out"
 fi
 exec > "$LOG_FILE" 2>&1
 
@@ -62,7 +62,7 @@ case $JOB_TYPE in
   math)
       accelerate launch run_exp.py -m \
         ++dataset_name=meta_math \
-        ++model.epochs=3 \
+        ++model.epochs=$ep \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -94,7 +94,7 @@ case $JOB_TYPE in
   code)
     accelerate launch run_exp.py  \
     -m ++dataset_name=codefeedback \
-        ++model.epochs=3 \
+        ++model.epochs=$ep \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -127,7 +127,7 @@ case $JOB_TYPE in
   alpaca)
     accelerate launch run_exp.py  \
     -m ++dataset_name=alpaca \
-        ++model.epochs=3 \
+        ++model.epochs=$ep \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -157,7 +157,7 @@ case $JOB_TYPE in
   commonsense)
    accelerate launch run_exp.py  \
     -m ++dataset_name=commonsense_reasoning \
-        ++model.epochs=1 \
+        ++model.epochs=$ep \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         ++model.real_batch_size=16 \
@@ -180,17 +180,17 @@ case $JOB_TYPE in
         ++model.lr_scheduler_type=cosine \
         ++model.learning_rate=1e-4 \
 
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$4
+    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
 
   commonsense_eval)
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$4
+    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
     
   dialogue)
     accelerate launch run_exp.py  \
     -m ++dataset_name=wizard_lm \
-        ++model.epochs=1 \
+        ++model.epochs=$ep \
         ++model.eval_epochs=1 \
         ++model.saving=false \
         +init=gradient \
@@ -218,9 +218,9 @@ case $JOB_TYPE in
 
   nlu)
     CUDA_VISIBLE_DEVICES=0 accelerate launch run_exp.py  \
-    -m ++dataset_name=$4 \
+    -m ++dataset_name=$extra_arg \
         model=t5base \
-        ++model.epochs=3 \
+        ++model.epochs=$ep \
         ++model.saving=false \
         +init=gradient \
         ++init.direction=LoRA-One \
