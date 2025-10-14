@@ -6,33 +6,42 @@
 #SBATCH --time=12:00:00
 #SBATCH --mem=128G
 
-# USAGE: sbatch main_FA.slurm math 8 <epoch> <reg_alpha> <extra_arg>
+# USAGE: 
+# sbatch main_FA.slurm --job_type=commonsense --iters=8 --epoch=1 --reg_alpha=1e-6 --tag=test --extra_arg ["boolq", "piqa", "social_i_qa", "hellaswag", "winogrande", "ARC-Challenge", "ARC-Easy", "openbookqa"],
+# sbatch main_FA.slurm --job_type=commonsense --iters=8 --epoch=1 --reg_alpha=1e-6 --tag=test --extra_arg=piqa
+
 # --- Argument Handling ---
-if [ -z "$1" ]; then
-    echo "ERROR: No job type specified."
-    echo "Usage: sbatch $0 {math|math_eval|code|code_eval|dialogue|dialogue_eval|alpaca|alpaca_eval|commonsense|commonsense_eval|nlu}"
-    exit 1
-fi
-JOB_TYPE=$1
-iters=$2 
-ep=$3  #epoch
-extra_arg=$5 # test file for commonsense and nlu tasks or <tag>
-reg_alpha=$4 #1e-6
+source ./parse_args.sh "$@"
+WANDB_NAME="lorafa-${ITERS}-ep${EPOCHS}"
 
-wandb_name=lorafa-$iters-ep$ep-$extra_arg  # lorafa-32-ep1 or lorafa-32-ep2 or lorafa-32-ep3
-echo "wandb_name: $wandb_name"
-
-# --- Dynamic Logging ---
 LOG_DIR="logs/lorafa"
-mkdir -p $LOG_DIR 
-if [ -n "$extra_arg" ]; then
-    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${reg_alpha}_${JOB_TYPE}_${extra_arg}_${SLURM_JOB_ID}.out"
-else
-    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${reg_alpha}_${JOB_TYPE}_${SLURM_JOB_ID}.out"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/${JOB_TYPE}_${ITERS}_ep${EPOCHS}_${REG_ALPHA}"
+if [ -n "$TAG" ]; then
+  LOG_FILE="${LOG_FILE}_${TAG}"
+  WANDB_NAME="${WANDB_NAME}_${TAG}"
 fi
-
+if [ -n "$EXTRA_ARG" ]; then
+  LOG_FILE="${LOG_FILE}_${EXTRA_ARG}"
+fi
+LOG_FILE="${LOG_FILE}_${SLURM_JOB_ID}.out"
 exec > "$LOG_FILE" 2>&1
 
+echo "====== ARGUMENTS ======"
+echo "JOB_TYPE: $JOB_TYPE"
+echo "WANDB_NAME: $WANDB_NAME"
+echo "LOG_FILE: $LOG_FILE"
+echo "ITERS: $ITERS"
+echo "EPOCHS: $EPOCHS"
+echo "REG_ALPHA: $REG_ALPHA"
+echo "TAG: $TAG"
+echo "EXTRA_ARG: $EXTRA_ARG"
+echo "======================="
+ep=$EPOCHS
+iters=$ITERS
+reg_alpha=$REG_ALPHA
+extra_arg=$EXTRA_ARG
+wandb_name=$WANDB_NAME
 
 # --- Load modules and activate environment ---
 module purge
@@ -86,6 +95,7 @@ case $JOB_TYPE in
         ++model.weight_decay=0.0 \
         ++model.lr_scheduler_type=cosine \
         ++model.learning_rate=2e-4 \
+        ++model.real_batch_size=32 \
         ++init.reg_alpha=$reg_alpha
       
       ckpt="./results/lorafa_meta_math/$wandb_name/9/"
@@ -97,6 +107,7 @@ case $JOB_TYPE in
     srun python eval_gsm8k.py --model_name=$ckpt --wandb_name=$wandb_name
     ;;
 
+  #lr = 5e-4
   code)
     accelerate launch run_exp.py  \
     -m ++dataset_name=codefeedback \
@@ -120,6 +131,7 @@ case $JOB_TYPE in
         ++model.weight_decay=0.0 \
         ++model.lr_scheduler_type=cosine \
         ++model.learning_rate=2e-4 \
+        ++model.real_batch_size=32 \
         ++init.reg_alpha=$reg_alpha
 
 
@@ -154,9 +166,9 @@ case $JOB_TYPE in
         ++model.weight_decay=0.0 \
         ++model.lr_scheduler_type=cosine \
         ++model.learning_rate=2e-4 \
+        ++model.real_batch_size=16 \
         ++init.reg_alpha=$reg_alpha
 
-        
     torchrun --nproc_per_node=2 eval_mmlu.py  --wandb_name="$wandb_name"
     ;;
   alpaca_eval)
@@ -226,6 +238,13 @@ dialogue)
   python fastchat/llm_judge/gen_judgment.py --model-list $wandb_name --judge-model gpt-4 --bench-name mt_bench --parallel 2
   ;;
 
+# SST-2, CoLA, QNLI, and MRPC. {1 ×10−4,0.1,5 ×10−2, 5 ×10−2}.
+#mrpc 0.01 --> old 0.00001 
+#cola 0.1 *
+#qnli 0.05
+#sst2 1e-4
+#weight decay 0.1
+
 nlu)
   CUDA_VISIBLE_DEVICES=0 accelerate launch run_exp.py  \
   -m ++dataset_name=$extra_arg \
@@ -246,7 +265,7 @@ nlu)
       ++model.weight_decay=0.0 \
       ++model.warmup_steps=0 \
       ++model.lr_scheduler_type=cosine  \
-      ++model.learning_rate=0.05 \
+      ++model.learning_rate=0.01 \
       ++init.reg_alpha=$reg_alpha
 
   ;;
