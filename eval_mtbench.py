@@ -45,7 +45,9 @@ def main(wandb_name):
             all_questions.append(json.loads(line))
 
     model_answers = []
-    model_id = f"{wandb_name}_model"
+    # model_id = f"{wandb_name}_model"
+    model_id = f"{wandb_name}"
+
 
     # --- Step 3: Generate Model Responses ---
     for question in tqdm(all_questions, desc="Generating Answers"):
@@ -84,7 +86,8 @@ def main(wandb_name):
         })
 
     # --- Save results ---
-    output_file = f"./eval_results/dialogue_eval/{model_id}_answers.jsonl"
+    # output_file = f"./eval_results/dialogue_eval/{model_id}_answers.jsonl"
+    output_file = f"/users/PGS0218/julina/projects/LoRA-FA/FastChat/fastchat/llm_judge/data/mt_bench/model_answer/{model_id}.jsonl"
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, "w") as f:
         for answer in model_answers:

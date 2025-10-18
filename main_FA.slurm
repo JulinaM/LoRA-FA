@@ -12,7 +12,7 @@
 
 # --- Argument Handling ---
 source ./parse_args.sh "$@"
-WANDB_NAME="lorafa-${ITERS}-ep${EPOCHS}"
+WANDB_NAME="lorafa-${ITERS}-ep${EPOCHS}_${REG_ALPHA}"
 
 LOG_DIR="logs/lorafa"
 mkdir -p "$LOG_DIR"
@@ -202,11 +202,12 @@ case $JOB_TYPE in
         ++model.learning_rate=1e-4 \
         ++init.reg_alpha=$reg_alpha
         
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    torchrun --nproc_per_node=2 eval_commonsense_v2.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
 
     commonsense_eval)
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    # torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    torchrun --nproc_per_node=2 eval_commonsense_v2.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
 
 dialogue)
@@ -233,10 +234,19 @@ dialogue)
       ++model.lr_scheduler_type=cosine \
       ++model.learning_rate=2e-4 \
       ++init.reg_alpha=$reg_alpha
-
   torchrun --nproc_per_node=2 eval_mtbench.py  --wandb_name="$wandb_name"
-  python fastchat/llm_judge/gen_judgment.py --model-list $wandb_name --judge-model gpt-4 --bench-name mt_bench --parallel 2
-  ;;
+;;
+
+dialogue_eval)
+  torchrun --nproc_per_node=2 eval_mtbench.py  --wandb_name="$wandb_name"
+;;
+dialogue_judge)
+  source activate fastchat
+  cd FastChat/fastchat/llm_judge/
+  python gen_judgment.py   --mode single  --model-list "$wandb_name"
+  python show_result.py --model-list "$wandb_name"
+  cd -
+;;
 
 # SST-2, CoLA, QNLI, and MRPC. {1 ×10−4,0.1,5 ×10−2, 5 ×10−2}.
 #mrpc 0.01 --> old 0.00001 

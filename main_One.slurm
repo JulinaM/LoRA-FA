@@ -6,29 +6,40 @@
 #SBATCH --time=12:00:00
 #SBATCH --mem=64G
 
-# USAGE: sbatch main_One.slurm math 8 <tag> <extra_arg>
-# --- Argument Handling ---
-if [ -z "$1" ]; then
-    echo "ERROR: No job type specified."
-    echo "Usage: sbatch $0 {math_train|math_eval|code_train|code_eval|alpaca|alpaca_eval}"
-    exit 1
-fi
-JOB_TYPE=$1
-iters=$2 
-ep=$3  #epoch
-extra_arg=$4  # test file for commonsense or <tag>
-wandb_name=loraone-$iters-ep$ep-$extra_arg  # loraone-32-ep1-test or loraone-16-ep3-V1
-echo "wandb_name: $wandb_name"
+# USAGE: 
+# sbatch main_One.slurm --job_type=commonsense --iters=8 --epoch=1 --tag=test --extra_arg=piqa
 
-# --- Dynamic Logging ---
+# --- Argument Handling ---
+source ./parse_args.sh "$@"
+WANDB_NAME="loraone-${ITERS}-ep${EPOCHS}"
+
 LOG_DIR="logs/loraone"
-mkdir -p $LOG_DIR 
-if [ -n "$extra_arg" ]; then
-    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${run_type}_${JOB_TYPE}_${extra_arg}_${SLURM_JOB_ID}.out"
-else
-    LOG_FILE="${LOG_DIR}/${iters}_ep${ep}_${run_type}_${JOB_TYPE}_${SLURM_JOB_ID}.out"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/${JOB_TYPE}_${ITERS}_ep${EPOCHS}"
+if [ -n "$TAG" ]; then
+  LOG_FILE="${LOG_FILE}_${TAG}"
+  WANDB_NAME="${WANDB_NAME}_${TAG}"
 fi
+if [ -n "$EXTRA_ARG" ]; then
+  LOG_FILE="${LOG_FILE}_${EXTRA_ARG}"
+fi
+LOG_FILE="${LOG_FILE}_${SLURM_JOB_ID}.out"
 exec > "$LOG_FILE" 2>&1
+
+echo "====== ARGUMENTS ======"
+echo "JOB_TYPE: $JOB_TYPE"
+echo "WANDB_NAME: $WANDB_NAME"
+echo "LOG_FILE: $LOG_FILE"
+echo "ITERS: $ITERS"
+echo "EPOCHS: $EPOCHS"
+echo "TAG: $TAG"
+echo "EXTRA_ARG: $EXTRA_ARG"
+echo "======================="
+ep=$EPOCHS
+iters=$ITERS
+reg_alpha=$REG_ALPHA
+extra_arg=$EXTRA_ARG
+wandb_name=$WANDB_NAME
 
 # --- Load modules and activate environment ---
 module purge
@@ -174,17 +185,19 @@ case $JOB_TYPE in
         ++wandb.name=$wandb_name \
         ++wandb.project=lorafa \
         ++init.iters=$iters \
-        ++model.warmup_steps=0 \
-        ++model.warmup_ratio=0.03 \
+        ++model.warmup_ratio=0 \
+        ++model.warmup_steps=100 \
         ++model.weight_decay=0.0 \
         ++model.lr_scheduler_type=cosine \
         ++model.learning_rate=1e-4 \
+        ++init.reg_alpha=$reg_alpha
 
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    torchrun --nproc_per_node=2 eval_commonsense_v2.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
 
   commonsense_eval)
-    torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    # torchrun --nproc_per_node=2 eval_commonsense.py --wandb_name="$wandb_name" --dataset=$extra_arg
+    torchrun --nproc_per_node=1 eval_commonsense_v2.py --wandb_name="$wandb_name" --dataset=$extra_arg
     ;;
     
   dialogue)
@@ -212,9 +225,16 @@ case $JOB_TYPE in
         ++model.learning_rate=2e-4 \
 
     torchrun --nproc_per_node=2 eval_mtbench.py  --wandb_name="$wandb_name"
-    python fastchat/llm_judge/gen_judgment.py --model-list $wandb_name --judge-model gpt-4 --bench-name mt_bench --parallel 2
-    # python -m human_eval.evaluate_functional_correctness evaluation_results/chat/${wandb_name}_model_answers.jsonl
     ;;
+
+  dialogue_judge)
+    # torchrun --nproc_per_node=2 eval_mtbench.py  --wandb_name="$wandb_name"
+    source activate fastchat
+    cd FastChat/fastchat/llm_judge/
+    python gen_judgment.py   --mode single  --model-list="$wandb_name"
+    python show_result.py --model-list "$wandb_name"
+    cd -
+  ;;
 
   nlu)
     CUDA_VISIBLE_DEVICES=0 accelerate launch run_exp.py  \
