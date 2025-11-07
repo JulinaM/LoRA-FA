@@ -119,9 +119,14 @@ def main():
                 repetition_penalty=1.15,
                 do_sample=False,
             )
-            generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            # remove the prompt prefix if the model echoes input
-            generated_text = generated_text.replace(prompt, "").strip()
+            # generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # # remove the prompt prefix if the model echoes input
+            # generated_text = generated_text.replace(prompt, "").strip()
+
+            decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            if decoded.startswith(prompt):
+                decoded = decoded[len(prompt):]
+            generated_text = decoded.strip()
 
         rec = {
             "prompt": prompt,
